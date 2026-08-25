@@ -11,15 +11,15 @@
 ## Stato attuale e correzioni di base
 
 - [x] Rispettare `defense_modifier.enabled` nel simulatore browser.
-- [ ] Rendere identica la semantica del modificatore in Python e browser.
-  - [ ] Richiedere portiere con voto e almeno `required_defenders` difensori con voto.
-  - [ ] Calcolare la media con voto puro del portiere e migliori tre voti puri dei difensori.
-  - [ ] Selezionare la fascia piu' alta raggiunta.
-  - [ ] Non usare bonus, malus o fantavoti nella media difensiva.
-  - [ ] Non assegnare il bonus con formazione incompleta.
+- [x] Rendere identica la semantica del modificatore in Python e browser.
+  - [x] Richiedere portiere con voto e almeno `required_defenders` difensori con voto.
+  - [x] Calcolare la media con voto puro del portiere e migliori tre voti puri dei difensori.
+  - [x] Selezionare la fascia piu' alta raggiunta.
+  - [x] Non usare bonus, malus o fantavoti nella media difensiva.
+  - [x] Non assegnare il bonus con formazione incompleta.
 - [ ] Estrarre una funzione browser pura per il calcolo del bonus e riusarla nel simulatore mock e nel valutatore d'asta.
-- [ ] Correggere il simulatore mock browser affinche' riconosca il calendario canonico e non generi un calendario fittizio quando il calendario reale e' presente.
-- [ ] Aggiungere vettori di parita' Python/browser per soglie, portiere, migliori tre difensori, quinto difensore e formazione incompleta.
+- [x] Correggere il simulatore mock browser affinche' riconosca il calendario canonico e non generi un calendario fittizio quando il calendario reale e' presente.
+- [x] Aggiungere vettori di parita' Python/browser per soglie, portiere, migliori tre difensori, quinto difensore e formazione incompleta.
 
 ## Orizzonti temporali
 
@@ -174,8 +174,8 @@ margine corretto =
 
 ## Test e calibrazione
 
-- [ ] Test Python per la semantica del modificatore: portiere, migliori tre, quinta scelta, fasce, soglie e formazione incompleta.
-- [ ] Test browser con gli stessi vettori di parita'.
+- [x] Test Python per la semantica del modificatore: portiere, migliori tre, quinta scelta, fasce, soglie e formazione incompleta.
+- [x] Test browser con gli stessi vettori di parita'.
 - [ ] Test di valore marginale: candidato uguale all'alternativa, quarto difensore, quinto difensore, portiere, varianza, modificatore disattivato e formazione impossibile.
 - [ ] Test del limite: il bonus puo' cambiare il consiglio ma mai superare vincoli legali o di completamento.
 - [ ] Test di riproducibilita' a seed e rosa invariati.
@@ -189,7 +189,7 @@ margine corretto =
 
 ## Ordine di consegna
 
-- [ ] 1. Parita' del modificatore Python/browser e test di regressione.
+- [x] 1. Parita' del modificatore Python/browser e test di regressione.
 - [ ] 2. Distinzione esplicita tra storico a 38 giornate e orizzonte corrente della lega.
 - [ ] 3. Selezione formazione consapevole del modificatore.
 - [ ] 4. Policy pura delle modifiche impostazioni e correzione del salvataggio profilo.
