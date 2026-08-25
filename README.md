@@ -1,4 +1,4 @@
-# Fantacalcio Auction Advisor
+# fishertiger - A Fantacalcio Auction Advisor
 
 Local-first advisor for a Classic Fantacalcio Serie A auction. It builds player
 projections, supports a live auction, replays randomized auctions, and runs a
