@@ -53,6 +53,14 @@ def test_canonical_calendar_json_is_loaded_without_legacy_workbook(tmp_path):
     assert load_canonical_league_calendar(tmp_path) == calendar
 
 
+def test_optional_profile_calendar_can_be_absent(tmp_path):
+    source = json.loads((__import__("pathlib").Path(__file__).parents[1] / "config/default_profile.json").read_text())
+    calendar = next(item for item in source["current_sources"] if item["name"] == "league_calendar")
+    calendar["path"] = "not-yet-available.xlsx"
+
+    assert load_canonical_league_calendar(tmp_path, LeagueProfile.from_dict(source)) is None
+
+
 def test_profile_calendar_maps_consecutive_league_days_to_selected_serie_a_range(tmp_path):
     calendar = {"schema_version": "1.0", "league_id": "old", "teams": ["A", "B"], "participants_count": 2, "matchdays": [
         {"number": 1, "serie_a_matchday": 1, "fixtures": [{"home": "A", "away": "B"}]},

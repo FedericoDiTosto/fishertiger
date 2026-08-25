@@ -137,10 +137,12 @@ def load_league_calendar(raw: Path = RAW) -> pd.DataFrame:
     ).sort_values(["league_matchday", "home_team"]).reset_index(drop=True)
 
 
-def load_canonical_league_calendar(raw: Path = RAW, profile: LeagueProfile | None = None) -> dict:
+def load_canonical_league_calendar(raw: Path = RAW, profile: LeagueProfile | None = None) -> dict | None:
     """Load canonical JSON, generating it from the legacy workbook only when needed."""
     declared = _source_map(profile, raw).get("league_calendar")
     source = _resolve_source(declared, raw) if declared else raw / "calendario_lega.json"
+    if declared and not source.exists():
+        return None
     if source.exists():
         if source.suffix.lower() == ".json":
             calendar = json.loads(source.read_text(encoding="utf-8"))
@@ -396,7 +398,7 @@ def build_projections(raw: Path = RAW, output: Path = PROCESSED, config: ModelCo
             }
             for day in league_calendar["matchdays"]
         ],
-    }
+    } if league_calendar else None
     sources = _source_map(profile, raw)
     guide_source = sources.get("auction_guide")
     guide_path = _resolve_source(guide_source, raw) if guide_source else raw / "guide_asta_sosfanta.csv"
@@ -498,7 +500,7 @@ def build_projections(raw: Path = RAW, output: Path = PROCESSED, config: ModelCo
         web_export = web_export_dir / "auction_data.json"
         web_export.parent.mkdir(parents=True, exist_ok=True)
         with web_export.open("w") as handle:
-            public_payload = {**payload, "calendario_lega": anonymize_public_calendar(payload["calendario_lega"])}
+            public_payload = {**payload, "calendario_lega": anonymize_public_calendar(payload["calendario_lega"]) if payload["calendario_lega"] else None}
             json.dump(public_payload, handle, ensure_ascii=False, default=str, separators=(",", ":"), allow_nan=False)
     return payload
 

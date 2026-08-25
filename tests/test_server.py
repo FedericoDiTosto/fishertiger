@@ -16,6 +16,8 @@ class LocalApiServerTests(unittest.TestCase):
         self.calls = []
         self.profile = json.loads((Path(__file__).parents[1] / "config/default_profile.json").read_text(encoding="utf-8"))
         self.profile["profile_id"] = "my-team"
+        calendar_source = next(source for source in self.profile["current_sources"] if source["name"] == "league_calendar")
+        calendar_source["path"] = str(root / "missing-calendar.xlsx")
         self.profile = json.loads(LeagueProfile.from_dict(self.profile).canonical_json())
 
         def generator(profile, datasets_dir):
@@ -130,6 +132,56 @@ class LocalApiServerTests(unittest.TestCase):
         response, payload = self.request("POST", "/api/generate", b'{}', {"Content-Type": "application/json"})
         self.assertEqual(response.status, 400)
         self.assertEqual(payload["error"]["code"], "invalid_profile")
+
+    def test_generation_reports_invalid_source_data(self):
+        def invalid_generator(profile, datasets_dir):
+            raise ValueError("league calendar teams must match profile participants")
+
+        self.server.generator = invalid_generator
+        response, payload = self.request(
+            "POST",
+            "/api/generate",
+            json.dumps({"profile": self.profile}).encode("utf-8"),
+            {"Content-Type": "application/json"},
+        )
+
+        self.assertEqual(response.status, 422)
+        self.assertEqual(payload["error"]["code"], "invalid_source_data")
+        self.assertEqual(
+            payload["error"]["message"],
+            "league calendar teams must match profile participants",
+        )
+
+    def test_generation_derives_participants_from_calendar(self):
+        calendar = {
+            "schema_version": "1.0",
+            "league_id": "my-team",
+            "teams": ["Alpha", "Beta", "Gamma"],
+            "participants_count": 3,
+            "matchdays": [
+                {
+                    "number": 1,
+                    "serie_a_matchday": 1,
+                    "fixtures": [{"home": "Alpha", "away": "Beta"}],
+                }
+            ],
+        }
+        calendar_path = Path(self.temp_dir.name) / "calendar.json"
+        calendar_path.write_text(json.dumps(calendar), encoding="utf-8")
+        source = next(source for source in self.profile["current_sources"] if source["name"] == "league_calendar")
+        source.update(path=str(calendar_path), format="json")
+
+        response, payload = self.request(
+            "POST",
+            "/api/generate",
+            json.dumps({"profile": self.profile}).encode("utf-8"),
+            {"Content-Type": "application/json"},
+        )
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(self.calls[-1].participants.team_names, ("Alpha", "Beta", "Gamma"))
+        self.assertEqual(self.calls[-1].participants.user_team, "Alpha")
+        self.assertEqual(payload["profile_hash"], self.calls[-1].configuration_hash)
 
         response, payload = self.request("POST", "/api/generate", b'{"profile":{}}', {"Content-Type": "application/json"})
         self.assertEqual(response.status, 400)

@@ -122,11 +122,18 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             return
         try:
             profile = resolve_profile(request, self.server.profiles_dir, profile_loader=self.server.profile_loader)
+            profile = self._derive_calendar_participants(profile)
         except ProfileRequestError as error:
             self._error(HTTPStatus.BAD_REQUEST, "invalid_profile", str(error))
             return
+        except (OSError, ValueError) as error:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_source_data", str(error))
+            return
         try:
             result = generate_dataset(profile, self.server.datasets_dir, generator=self.server.generator)
+        except (FileNotFoundError, ValueError) as error:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_source_data", str(error))
+            return
         except Exception:
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "generation_failed", "Generation failed.")
             return
@@ -139,8 +146,12 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             return
         try:
             profile = resolve_profile(request, self.server.profiles_dir, profile_loader=self.server.profile_loader)
+            profile = self._derive_calendar_participants(profile)
         except ProfileRequestError as error:
             self._error(HTTPStatus.BAD_REQUEST, "invalid_profile", str(error))
+            return
+        except (OSError, ValueError) as error:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_source_data", str(error))
             return
         iterations = request.get("iterations", 1000)
         seed = request.get("seed", 202627)
@@ -162,6 +173,7 @@ class LocalApiHandler(BaseHTTPRequestHandler):
         try:
             value = json.loads(self.server.default_profile_path.read_text(encoding="utf-8"))
             profile = self.server.profile_loader(value)
+            profile = self._derive_calendar_participants(profile)
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "default_profile_unavailable", "The default profile is unavailable.")
             return
@@ -193,7 +205,10 @@ class LocalApiHandler(BaseHTTPRequestHandler):
         except OSError:
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "storage_error", "The stored profile is invalid or unreadable.")
             return
-        self._send_json(HTTPStatus.OK, profile.to_dict())
+        try:
+            self._send_json(HTTPStatus.OK, self._derive_calendar_participants(profile).to_dict())
+        except (OSError, ValueError) as error:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_source_data", str(error))
 
     def _put_profile(self, name: str) -> None:
         profile_path = self._profile_path(name)
@@ -271,13 +286,41 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             for source in getattr(profile, group):
                 declared = Path(source.path)
                 candidates = [declared] if declared.is_absolute() else [declared, Path.cwd() / declared, Path(__file__).resolve().parents[1] / declared]
+                existing_path = next((candidate for candidate in candidates if candidate.is_file()), None)
                 statuses.append({
                     "group": group,
                     "name": source.name,
                     "path": source.path,
-                    "exists": any(candidate.is_file() for candidate in candidates),
+                    "exists": existing_path is not None,
                 })
         self._send_json(HTTPStatus.OK, {"sources": statuses})
+
+    def _derive_calendar_participants(self, profile: Any) -> Any:
+        """Use the league calendar as the authoritative participant roster when available."""
+        source = next((item for item in profile.current_sources if item.name == "league_calendar"), None)
+        if source is None:
+            return profile
+        declared = Path(source.path)
+        candidates = [declared] if declared.is_absolute() else [declared, Path.cwd() / declared, Path(__file__).resolve().parents[1] / declared]
+        calendar_path = next((candidate for candidate in candidates if candidate.is_file()), None)
+        if calendar_path is None:
+            return profile
+        if calendar_path.suffix.lower() == ".json":
+            from .league_calendar import validate_calendar
+
+            calendar = json.loads(calendar_path.read_text(encoding="utf-8"))
+            validate_calendar(calendar)
+        else:
+            from .league_calendar import preprocess_legacy_calendar
+
+            calendar = preprocess_legacy_calendar(calendar_path, profile.profile_id)
+        value = profile.to_dict()
+        teams = calendar["teams"]
+        value["participants"] = {
+            "team_names": teams,
+            "user_team": profile.participants.user_team if profile.participants.user_team in teams else teams[0],
+        }
+        return self.server.profile_loader(value)
 
     def _dataset_manifest(self) -> None:
         try:

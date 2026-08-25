@@ -376,6 +376,16 @@ function SeasonView({ season, data, openPlayer, rules, profileId, onRerun, isSim
 
 function SeasonReport({ season, data, openPlayer, onRerun, isSimulating, simulationStatus }) {
   const [selected, setSelected] = useState(null);
+  if (!data.calendario_lega)
+    return (
+      <section className="data-view">
+        <div className="view-heading">
+          <span className="eyebrow">MONTE CARLO OFFLINE</span>
+          <h1>Calendario della lega richiesto</h1>
+          <p>Puoi usare dashboard, proiezioni e asta. Carica il calendario della lega nelle Impostazioni per simulare la stagione.</p>
+        </div>
+      </section>
+    );
   if (!season)
     return (
       <section className="data-view">

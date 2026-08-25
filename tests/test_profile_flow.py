@@ -60,6 +60,7 @@ def test_default_profile_posts_to_generator_and_serves_a_scoped_frontend_dataset
     client, generated = api
     profile = json.loads(DEFAULT_PROFILE_PATH.read_text(encoding="utf-8"))
     profile["profile_id"] = "profile-flow"
+    next(source for source in profile["current_sources"] if source["name"] == "league_calendar")["path"] = "/missing-calendar.xlsx"
     expected_profile = LeagueProfile.from_dict(profile)
 
     status, saved = client.request("PUT", "/api/profiles/profile-flow", json.dumps(profile).encode())

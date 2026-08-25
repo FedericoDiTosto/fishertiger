@@ -53,7 +53,7 @@ const currentSources = [
   { name: "starters", label: "Probabili titolari", path: "data/raw/titolari.csv", format: "csv", required: true },
   { name: "set_pieces", label: "Gerarchie piazzati", path: "data/raw/piazzati.csv", format: "csv", required: true },
   { name: "auction_guide", label: "Guida asta", path: "data/raw/guide_asta_sosfanta.csv", format: "csv", required: true },
-  { name: "league_calendar", label: "Calendario della lega", path: "data/raw/calendario_lega.xlsx", format: "xlsx", required: true },
+  { name: "league_calendar", label: "Calendario della lega", path: "data/raw/calendario_lega.xlsx", format: "xlsx", required: false },
 ];
 const historySources = [
   { name: "stats_2025_26", label: "Statistiche 2025/26", path: "data/raw/statistiche_2025_26.xlsx", format: "xlsx", required: true, season: "2025-26" },
@@ -72,7 +72,7 @@ const mergeSources = (definitions, supplied = []) =>
       ...saved,
       name: definition.name,
       format: definition.format,
-      required: true,
+      required: definition.required,
     };
   });
 const defaults = {
@@ -386,10 +386,12 @@ export function LeagueSettings({
       profile[group].map((source) => [group, source.name, source.path]),
     ),
   );
-  const sourceStates = Object.values(sourceStatuses);
-  const sourcesReady =
-    sourceStates.length === currentSources.length + historySources.length &&
-    sourceStates.every((value) => value === "present");
+  const sourcesReady = ["current_sources", "history_sources"].every((group) =>
+    profile[group].every(
+      (source) =>
+        !source.required || sourceStatuses[`${group}:${source.name}`] === "present",
+    ),
+  );
   useEffect(() => {
     setProfile(mergeProfile(initialProfile, leagueCalendar));
   }, [initialProfile, leagueCalendar]);
@@ -430,7 +432,7 @@ export function LeagueSettings({
       .then((response) =>
         response.ok ? response.json() : Promise.reject(response.status),
       )
-      .then(({ sources }) =>
+      .then(({ sources }) => {
         setSourceStatuses(
           Object.fromEntries(
             sources.map((source) => [
@@ -438,8 +440,8 @@ export function LeagueSettings({
               source.exists ? "present" : "missing",
             ]),
           ),
-        ),
-      )
+        );
+      })
       .catch((error) => {
         if (error?.name !== "AbortError")
           setSourceStatuses(
@@ -1315,8 +1317,8 @@ export function LeagueSettings({
       <footer className="ls-actions">
         <p>
           {sourcesReady
-            ? "Tutte le fonti previste sono presenti."
-            : "Carica o ripristina tutte le fonti mancanti prima di generare i dati."}
+            ? "Le fonti necessarie sono presenti. Il calendario della lega è facoltativo."
+            : "Carica o ripristina le fonti necessarie prima di generare i dati."}
         </p>
         <button type="submit" disabled={busy}>
           {busy ? "Salvataggio..." : "Salva profilo"}
