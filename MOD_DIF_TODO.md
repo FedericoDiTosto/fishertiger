@@ -36,8 +36,8 @@
 - [x] Definire la funzione obiettivo della formazione come punteggio individuale atteso piu' bonus difesa atteso quando il modificatore e' attivo.
 - [ ] Applicare la stessa funzione obiettivo nel simulatore Python, browser mock e valutatore d'asta.
 - [x] Valutare tutte le formazioni consentite: un 4-3-3 o 4-4-2 puo' superare un 3-4-3 quando il bonus atteso compensa la differenza individuale.
-- [ ] Conservare le attuali regole di panchina, sostituzioni per ruolo e limite globale.
-- [ ] Esplicitare con test il comportamento di `Basic`, `Strict`, `None`, `zero_score`, `forfeit` e `allow_partial`.
+- [x] Conservare le attuali regole di panchina, sostituzioni per ruolo e limite globale.
+- [x] Esplicitare con test il comportamento di `Basic`, `Strict`, `None`, `zero_score`, `forfeit` e `allow_partial`.
 
 ## Modello marginale per asta e consigli
 

@@ -1,3 +1,5 @@
+import pytest
+
 from advisor.config import LeagueConfig
 from advisor import simulation
 
@@ -60,3 +62,47 @@ def test_lineup_selection_can_prefer_four_defenders_for_expected_modifier():
     lineup = simulation._choose_lineup(available, league)
 
     assert sum(player["ruolo"] == "D" for player in lineup) == 4
+
+
+@pytest.mark.parametrize("switch_mode", ("Basic", "Strict"))
+def test_basic_and_strict_replace_an_absent_starter_with_the_same_role(monkeypatch, switch_mode):
+    _set_outcomes(monkeypatch, absent={12})
+
+    _, lineup = simulation._team_score(
+        list(range(1, 14)), _players(), 0, {}, None,
+        LeagueConfig(defense_modifier_enabled=False, switch_mode=switch_mode),
+    )
+
+    assert {player["id"] for player in lineup} == {1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 13}
+
+
+def test_none_disables_replacements(monkeypatch):
+    _set_outcomes(monkeypatch, absent={12})
+
+    score, lineup = simulation._team_score(
+        list(range(1, 14)), _players(), 0, {}, None,
+        LeagueConfig(defense_modifier_enabled=False, switch_mode="None", incomplete_lineup_policy="allow_partial"),
+    )
+
+    assert len(lineup) == 10
+    assert score == 100
+
+
+@pytest.mark.parametrize(
+    ("policy", "incomplete_score", "expected"),
+    (("zero_score", 0, 0), ("forfeit", 7, 7), ("allow_partial", 0, 100)),
+)
+def test_incomplete_lineup_policies_are_explicit(monkeypatch, policy, incomplete_score, expected):
+    _set_outcomes(monkeypatch, absent={12})
+
+    score, _ = simulation._team_score(
+        list(range(1, 14)), _players(), 0, {}, None,
+        LeagueConfig(
+            defense_modifier_enabled=False,
+            switch_mode="None",
+            incomplete_lineup_policy=policy,
+            incomplete_lineup_score=incomplete_score,
+        ),
+    )
+
+    assert score == expected

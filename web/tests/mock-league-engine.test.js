@@ -196,6 +196,16 @@ test("does not award a modifier to an incomplete lineup", () => {
   assert.equal(result.score, 70);
 });
 
+test("incomplete lineup policies produce their configured outcomes", () => {
+  const item = (id, ruolo) => ({ player: { id, ruolo }, values: { probability: 1, vote: 7, bonus: 0, deviation: 0, conceded: 0 } });
+  const selection = { starters: [item(1, "P"), ...Array.from({ length: 3 }, (_, index) => item(index + 2, "D")), ...Array.from({ length: 3 }, (_, index) => item(index + 5, "C")), ...Array.from({ length: 3 }, (_, index) => item(index + 8, "A"))], bench: [] };
+  const baseRules = { bench: { mode: "None", maxSubstitutions: 0 }, scoring: {}, defenseModifier: { enabled: true, requiredDefenders: 4, tiers: [{ threshold: 6, bonus: 3 }] } };
+
+  assert.equal(scoreTeam(selection, () => 0.5, { ...baseRules, incompleteLineup: "zero_score", incompleteLineupScore: 0 }).score, 0);
+  assert.equal(scoreTeam(selection, () => 0.5, { ...baseRules, incompleteLineup: "forfeit", incompleteLineupScore: 9 }).score, 9);
+  assert.equal(scoreTeam(selection, () => 0.5, { ...baseRules, incompleteLineup: "allow_partial" }).score, 70);
+});
+
 test("lineup selection can prefer four defenders for the expected modifier", () => {
   const roster = [
     { id: 1, ruolo: "P" },
