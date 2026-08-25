@@ -20,6 +20,7 @@ import {
   auctionDatasetPath,
   loadDatasetUrl,
   rulesFor,
+  saveProfile,
   seasonSimulationPath,
 } from "./profile-client.js";
 import { createRoleValuation, sourceFvm } from "./player-valuation.js";
@@ -125,14 +126,17 @@ function App() {
   const activeProfileId =
     profile?.profile_id || data?.meta?.profile?.profile_id || "default";
   const updateProfile = async (nextProfile, generate = false) => {
-    setProfile(nextProfile);
     setProfileError("");
-    if (!generate) return;
     try {
+      const savedProfile = await saveProfile(nextProfile, { apiBase });
+      if (!generate) {
+        setProfile(savedProfile);
+        return;
+      }
       const response = await fetch(`${apiBase}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile: nextProfile }),
+        body: JSON.stringify({ profile: savedProfile }),
       });
       const payload = await response.json();
       if (!response.ok || !payload.dataset_path)
@@ -142,9 +146,10 @@ function App() {
       setData(
         await loadDatasetUrl(
           apiUrl(`/api/datasets/${payload.dataset_path}`, apiBase),
-          { profile: nextProfile },
+          { profile: savedProfile },
         ),
       );
+      setProfile(savedProfile);
       setSeason(null);
       navigate("overview");
     } catch (error) {

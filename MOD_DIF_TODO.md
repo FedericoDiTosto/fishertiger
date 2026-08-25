@@ -101,15 +101,15 @@ margine corretto =
 
 ## Impostazioni: stato delle modifiche
 
-- [ ] Correggere `mergeProfile()` affinche' conservi i valori salvati di `bench_switch`.
+- [x] Correggere `mergeProfile()` affinche' conservi i valori salvati di `bench_switch`.
 - [ ] Separare nello stato applicativo:
   - [ ] bozza del form;
   - [ ] profilo salvato sul server;
   - [ ] profilo applicato ai motori browser;
   - [ ] profilo e fonti usati dall'ultimo dataset;
   - [ ] profilo e dataset usati dall'ultima simulazione Monte Carlo.
-- [ ] Fare in modo che `Salva profilo` esegua realmente `PUT /api/profiles/:id`.
-- [ ] Non sostituire il profilo applicato in modo definitivo prima del successo del salvataggio o della generazione.
+- [x] Fare in modo che `Salva profilo` esegua realmente `PUT /api/profiles/:id`.
+- [x] Non sostituire il profilo applicato in modo definitivo prima del successo del salvataggio o della generazione.
 - [ ] Dopo generazione, usare il profilo effettivo restituito dal server, inclusi partecipanti derivati dal calendario.
 - [ ] Estrarre una policy pura `profile-change-policy.js` che confronti baseline e bozza e classifichi ogni modifica.
 - [ ] Trattare `fantasy_matchdays` come derivato, non come modifica indipendente.

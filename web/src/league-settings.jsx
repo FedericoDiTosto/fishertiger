@@ -159,7 +159,7 @@ const mergeProfile = (profile = {}, leagueCalendar) => ({
   credits: { ...defaults.credits, ...profile.credits },
   roster_slots: { ...defaults.roster_slots, ...profile.roster_slots },
   formations: { ...defaults.formations, ...profile.formations },
-  bench_switch: clone(defaults.bench_switch),
+  bench_switch: { ...defaults.bench_switch, ...profile.bench_switch },
   scoring: { ...defaults.scoring, ...profile.scoring },
   virtual_goals: { ...defaults.virtual_goals, ...profile.virtual_goals },
   defense_modifier: {
