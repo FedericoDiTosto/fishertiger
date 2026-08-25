@@ -14,7 +14,7 @@ const profile = {
   credits: { starting: 600 }, roster_slots: { P: 2, D: 7, C: 7, A: 5 },
   formations: { allowed: ["3-4-3"] }, bench_switch: { max_substitutions: 2, mode: "Basic" },
   scoring: { goalkeeper_conceded_goal: -1 }, virtual_goals: { threshold: 65, step: 4 },
-  defense_modifier: { required_defenders: 4, tiers: [{ minimum_average: 6.5, bonus: 2 }] },
+  defense_modifier: { enabled: true, required_defenders: 4, tiers: [{ minimum_average: 6.5, bonus: 2 }] },
   standings: { win_points: 3, draw_points: 1, loss_points: 0, tie_breakers: ["goal_difference"], exact_tie_policy: "shared" },
   incomplete_lineup: { policy: "error" }, auction: { minimum_bid: 2, bid_increment: 2, reserve_credits_per_open_slot: 3, nomination_policy: "call" },
 };
@@ -34,6 +34,7 @@ test("accepts legacy payloads and resolves profile rules for league engines", ()
   assert.equal(rules.startingCredits, 600);
   assert.equal(rules.auction.reserve, 3);
   assert.equal(rules.defenseModifier.tiers[0].threshold, 6.5);
+  assert.equal(rules.defenseModifier.enabled, true);
 });
 
 test("normalizes extra formation strings for browser engines", () => {

@@ -148,3 +148,34 @@ test("respects the configured global substitution limit", () => {
     { P: 1, D: 2, C: 0, A: 0 },
   );
 });
+
+test("applies the defense modifier only when enabled", () => {
+  let playerId = 1;
+  const item = (ruolo) => ({
+    player: { id: playerId++, ruolo },
+    values: { probability: 1, vote: 6.5, bonus: 0, deviation: 0, conceded: 0 },
+  });
+  const selection = {
+    starters: [item("P"), ...Array.from({ length: 4 }, () => item("D")), ...Array.from({ length: 3 }, () => item("C")), ...Array.from({ length: 3 }, () => item("A"))],
+    bench: [],
+  };
+  const baseRules = {
+    bench: { roles: [], maxSubstitutions: 0, mode: "None" },
+    scoring: { goalkeeperConceded: 0 },
+    defenseModifier: {
+      requiredDefenders: 4,
+      tiers: [{ threshold: 6, bonus: 2 }],
+    },
+  };
+
+  const withoutModifier = scoreTeam(selection, () => 0.5, {
+    ...baseRules,
+    defenseModifier: { ...baseRules.defenseModifier, enabled: false },
+  });
+  const withModifier = scoreTeam(selection, () => 0.5, {
+    ...baseRules,
+    defenseModifier: { ...baseRules.defenseModifier, enabled: true },
+  });
+
+  assert.equal(withModifier.score - withoutModifier.score, 2);
+});

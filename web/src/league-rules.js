@@ -6,7 +6,7 @@ export const LEGACY_RULES = Object.freeze({
   bench: { roles: ["P", "P", "D", "D", "D", "C", "C", "C", "A", "A", "A"], maxSubstitutions: 3, mode: "Basic" },
   scoring: { goalkeeperConceded: 0 },
   virtualGoals: { threshold: 66, increment: 5 },
-  defenseModifier: { requiredDefenders: 4, tiers: [] },
+  defenseModifier: { enabled: false, requiredDefenders: 4, tiers: [] },
   standings: { win: 3, draw: 1, loss: 0, tieBreakers: ["goal_difference", "head_to_head", "season_fantasy_score"], exactTie: "index" },
   incompleteLineup: "error",
   auction: {
@@ -92,7 +92,7 @@ export const normalizeRules = (input = {}) => {
     },
     scoring: { ...LEGACY_RULES.scoring, ...scoring, goalkeeperConceded: Number(scoring.goalkeeperConceded ?? scoring.goalkeeper_conceded ?? scoring.portiere_gol_subiti ?? LEGACY_RULES.scoring.goalkeeperConceded) },
     virtualGoals: { threshold: Number(virtualGoals.threshold ?? virtualGoals.soglia ?? LEGACY_RULES.virtualGoals.threshold), increment: Number(virtualGoals.increment ?? virtualGoals.scatto ?? LEGACY_RULES.virtualGoals.increment) },
-    defenseModifier: { requiredDefenders: integer(defense.requiredDefenders ?? defense.difensori_richiesti, LEGACY_RULES.defenseModifier.requiredDefenders), tiers: Array.isArray(defense.tiers || defense.fasce) ? defense.tiers || defense.fasce : [] },
+    defenseModifier: { enabled: defense.enabled === true, requiredDefenders: integer(defense.requiredDefenders ?? defense.difensori_richiesti, LEGACY_RULES.defenseModifier.requiredDefenders), tiers: Array.isArray(defense.tiers || defense.fasce) ? defense.tiers || defense.fasce : [] },
     standings: { win: Number(standings.win ?? standings.vittoria ?? 3), draw: Number(standings.draw ?? standings.pareggio ?? 1), loss: Number(standings.loss ?? standings.sconfitta ?? 0), tieBreakers: tieBreakers.length ? tieBreakers : LEGACY_RULES.standings.tieBreakers, exactTie: standings.exactTie ?? standings.exact_tie ?? LEGACY_RULES.standings.exactTie },
     incompleteLineup: object(source.incompleteLineup ?? source.incomplete_lineup ?? source.formazione_incompleta).policy ?? source.incompleteLineup ?? source.incomplete_lineup ?? source.formazione_incompleta ?? LEGACY_RULES.incompleteLineup,
     auction: {

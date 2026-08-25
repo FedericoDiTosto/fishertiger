@@ -91,7 +91,7 @@ export const scoreTeam = (selection, random, rules) => {
   }
   const scored = active.filter((item) => item.played).map((item) => ({ ...item, points: Math.max(4, Math.min(10, item.values.vote + normal(random) * item.values.deviation)) + item.values.bonus + (item.player.ruolo === "P" ? item.values.conceded * Number(rules.scoring.goalkeeperConceded || 0) : 0) }));
   const defenderVotes = scored.filter((item) => item.player.ruolo === "D").map((item) => item.points).sort((a, b) => b - a);
-  const tier = rules.defenseModifier.tiers.find((item) => defenderVotes.length >= rules.defenseModifier.requiredDefenders && (defenderVotes.reduce((sum, vote) => sum + vote, 0) / defenderVotes.length) >= Number(item.min ?? item.threshold ?? item.media ?? Infinity));
+  const tier = rules.defenseModifier.enabled && rules.defenseModifier.tiers.find((item) => defenderVotes.length >= rules.defenseModifier.requiredDefenders && (defenderVotes.reduce((sum, vote) => sum + vote, 0) / defenderVotes.length) >= Number(item.min ?? item.threshold ?? item.media ?? Infinity));
   return { score: scored.reduce((sum, item) => sum + item.points, 0) + Number(tier?.bonus ?? tier?.points ?? 0), scored };
 };
 const goals = (score, rules) => score < rules.virtualGoals.threshold ? 0 : 1 + Math.floor((score - rules.virtualGoals.threshold) / rules.virtualGoals.increment);

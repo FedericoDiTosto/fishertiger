@@ -175,7 +175,7 @@ export const rulesFor = (profile, data = {}) => {
     },
     scoring: { ...object(fallback.scoring), goalkeeperConceded: pick(scoring.goalkeeper_conceded_goal, object(fallback.scoring).goalkeeperConceded) },
     virtualGoals: { ...object(fallback.virtualGoals), threshold: pick(virtualGoals.threshold, object(fallback.virtualGoals).threshold), increment: pick(virtualGoals.step, object(fallback.virtualGoals).increment) },
-    defenseModifier: { ...object(fallback.defenseModifier), requiredDefenders: pick(defense.required_defenders, object(fallback.defenseModifier).requiredDefenders), tiers: pick(defense.tiers?.map((tier) => ({ ...tier, threshold: tier.minimum_average ?? tier.threshold })), object(fallback.defenseModifier).tiers) },
+    defenseModifier: { ...object(fallback.defenseModifier), enabled: pick(defense.enabled, object(fallback.defenseModifier).enabled), requiredDefenders: pick(defense.required_defenders, object(fallback.defenseModifier).requiredDefenders), tiers: pick(defense.tiers?.map((tier) => ({ ...tier, threshold: tier.minimum_average ?? tier.threshold })), object(fallback.defenseModifier).tiers) },
     standings: { ...object(fallback.standings), win: pick(standings.win_points, object(fallback.standings).win), draw: pick(standings.draw_points, object(fallback.standings).draw), loss: pick(standings.loss_points, object(fallback.standings).loss), tieBreakers: pick(standings.tie_breakers, object(fallback.standings).tieBreakers), exactTie: pick(standings.exact_tie_policy, object(fallback.standings).exactTie) },
     incompleteLineup: pick(incomplete.policy, fallback.incompleteLineup || fallback.incomplete_lineup),
     auction: {
