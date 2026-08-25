@@ -6,7 +6,7 @@ import {
   scoreTeam,
   simulateMockLeague,
 } from "../src/mock-league-engine.js";
-import { defenseModifierBonus } from "../src/defense-modifier.js";
+import { defenseModifierBonus, expectedDefenseModifier } from "../src/defense-modifier.js";
 
 const ROLES = { P: 3, D: 8, C: 8, A: 6 };
 const teamNames = Array.from({ length: 8 }, (_, index) => `Team ${index + 1}`);
@@ -194,4 +194,17 @@ test("does not award a modifier to an incomplete lineup", () => {
   const selection = { starters: [item(1, "P"), ...Array.from({ length: 4 }, (_, index) => item(index + 2, "D")), ...Array.from({ length: 5 }, (_, index) => item(index + 6, "C"))], bench: [] };
   const result = scoreTeam(selection, () => 0.5, { bench: { mode: "None", maxSubstitutions: 0 }, scoring: {}, incompleteLineup: "allow_partial", defenseModifier: { enabled: true, requiredDefenders: 4, tiers: [{ threshold: 6, bonus: 3 }] } });
   assert.equal(result.score, 70);
+});
+
+test("lineup selection can prefer four defenders for the expected modifier", () => {
+  const roster = [
+    { id: 1, ruolo: "P" },
+    ...Array.from({ length: 4 }, (_, index) => ({ id: index + 2, ruolo: "D" })),
+    ...Array.from({ length: 4 }, (_, index) => ({ id: index + 6, ruolo: "C" })),
+    ...Array.from({ length: 4 }, (_, index) => ({ id: index + 10, ruolo: "A" })),
+  ].map((player) => ({ ...player, p_gioca_per_giornata: [1], voto_puro_mean_per_giornata: [player.ruolo === "P" || player.ruolo === "D" ? 7 : 6], bonus_atteso_per_giornata: [player.ruolo === "C" ? 0.4 : 0], voto_puro_std_per_giornata: [0] }));
+  const rules = { rosterSlots: ROLES, formations: [[3, 4, 3], [4, 3, 3]], incompleteLineup: "error", defenseModifier: { enabled: true, requiredDefenders: 4, tiers: [{ threshold: 6, bonus: 1 }] } };
+
+  assert.equal(chooseLineup(roster, 0, rules).starters.filter((item) => item.player.ruolo === "D").length, 4);
+  assert.equal(expectedDefenseModifier({ ...rules.defenseModifier, goalkeeper: { probability: 1, vote: 7 }, defenders: Array.from({ length: 4 }, () => ({ probability: 1, vote: 7 })) }), 1);
 });

@@ -1,5 +1,5 @@
 import { normalizeRules } from "./league-rules.js";
-import { defenseModifierBonus } from "./defense-modifier.js";
+import { defenseModifierBonus, expectedDefenseModifier } from "./defense-modifier.js";
 
 const idKey = (id) => `${typeof id}:${String(id)}`;
 const finiteAt = (values, day, label, fallback = 0) => {
@@ -76,7 +76,16 @@ export const chooseLineup = (roster, day, rules) => {
   roster.forEach((player, order) => { if (byRole[player.ruolo]) { const values = playerValues(player, day); byRole[player.ruolo].push({ player, values, order, expected: values.probability * (values.vote + values.bonus) }); } });
   Object.values(byRole).forEach((items) => items.sort((a, b) => b.expected - a.expected || a.order - b.order));
   let best; let expected = -Infinity;
-  for (const formation of rules.formations) { const counts = countsFor(formation); const lineup = Object.entries(counts).flatMap(([role, count]) => byRole[role]?.slice(0, count) || []); const score = lineup.reduce((sum, item) => sum + item.expected, 0); if (lineup.length === 11 && score > expected) { best = lineup; expected = score; } }
+  for (const formation of rules.formations) {
+    const counts = countsFor(formation);
+    const lineup = Object.entries(counts).flatMap(([role, count]) => byRole[role]?.slice(0, count) || []);
+    const score = lineup.reduce((sum, item) => sum + item.expected, 0) + expectedDefenseModifier({
+      ...rules.defenseModifier,
+      goalkeeper: lineup.find((item) => item.player.ruolo === "P") && { probability: lineup.find((item) => item.player.ruolo === "P").values.probability, vote: lineup.find((item) => item.player.ruolo === "P").values.vote },
+      defenders: lineup.filter((item) => item.player.ruolo === "D").map((item) => ({ probability: item.values.probability, vote: item.values.vote })),
+    });
+    if (lineup.length === 11 && score > expected) { best = lineup; expected = score; }
+  }
   if (!best && rules.incompleteLineup === "error") throw new Error("Roster cannot field an allowed formation");
   const starters = best || roster.slice(0, 11).map((player, order) => ({ player, order, values: playerValues(player, day), expected: 0 }));
   const starterIds = new Set(starters.map((item) => idKey(item.player.id)));

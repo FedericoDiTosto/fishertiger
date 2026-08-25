@@ -1,4 +1,4 @@
-from advisor.defense import defense_modifier
+from advisor.defense import defense_modifier, expected_defense_modifier
 
 
 def test_modifier_requires_four_defenders():
@@ -24,3 +24,9 @@ def test_modifier_uses_only_the_best_three_of_five_defenders():
 def test_modifier_selects_the_highest_reached_custom_tier():
     tiers = ((6.0, 1), (6.25, 2), (6.5, 3))
     assert defense_modifier(6.5, [6.5, 6.5, 6.5, 5.0], tiers=tiers) == 3
+
+
+def test_expected_modifier_weights_availability_of_an_eligible_lineup():
+    assert expected_defense_modifier(
+        (1.0, 6.0), [(0.5, 6.0)] * 4, "LEAGUE"
+    ) == 0.0625
