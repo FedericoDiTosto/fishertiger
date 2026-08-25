@@ -23,13 +23,13 @@
 
 ## Orizzonti temporali
 
-- [ ] Formalizzare due orizzonti distinti nel modello.
-  - [ ] `historical_horizon`: sempre 38 giornate Serie A; usato per medie, tassi, varianza, confronti storici e calibrazione.
-  - [ ] `current_league_horizon`: giornate selezionate nello slider; usato per asta, valore strategico della rosa e simulazione corrente.
-- [ ] Verificare che nessun confronto con fonti storiche venga troncato in base allo slider della lega corrente.
-- [ ] Derivare gli indici Serie A del `current_league_horizon` dal calendario corrente quando disponibile.
-- [ ] Senza calendario di lega, usare il range selezionato per la proiezione strategica corrente, senza modificare i dati storici a 38 giornate.
-- [ ] Esporre nei risultati quale orizzonte e' stato usato per ogni metrica: `storico 38`, `lega corrente N`.
+- [x] Formalizzare due orizzonti distinti nel modello.
+  - [x] `historical_horizon`: sempre 38 giornate Serie A; usato per medie, tassi, varianza, confronti storici e calibrazione.
+  - [x] `current_league_horizon`: giornate selezionate nello slider; usato per asta, valore strategico della rosa e simulazione corrente.
+- [x] Verificare che nessun confronto con fonti storiche venga troncato in base allo slider della lega corrente.
+- [x] Derivare gli indici Serie A del `current_league_horizon` dal calendario corrente quando disponibile.
+- [x] Senza calendario di lega, usare il range selezionato per la proiezione strategica corrente, senza modificare i dati storici a 38 giornate.
+- [x] Esporre nei risultati quale orizzonte e' stato usato per ogni metrica: `storico 38`, `lega corrente N`.
 
 ## Selezione della formazione
 
@@ -190,7 +190,7 @@ margine corretto =
 ## Ordine di consegna
 
 - [x] 1. Parita' del modificatore Python/browser e test di regressione.
-- [ ] 2. Distinzione esplicita tra storico a 38 giornate e orizzonte corrente della lega.
+- [x] 2. Distinzione esplicita tra storico a 38 giornate e orizzonte corrente della lega.
 - [ ] 3. Selezione formazione consapevole del modificatore.
 - [ ] 4. Policy pura delle modifiche impostazioni e correzione del salvataggio profilo.
 - [ ] 5. Hash, impronte fonti e stato di freschezza di dataset/simulazione.

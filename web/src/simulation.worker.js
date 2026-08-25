@@ -15,7 +15,7 @@ const playerKey = (player) =>
     ? `${player?.nome || ""}|${player?.ruolo || ""}|${player?.squadra || ""}`
     : String(player.id);
 
-const contribution = projectedContribution;
+const contribution = (player, rules) => projectedContribution(player, rules.horizons?.currentLeague?.matchdayIndices);
 
 const roleNeeds = (team, rules) =>
   Object.fromEntries(
@@ -225,7 +225,7 @@ const estimatedCost = (
 
 // Returns the best exact-count value for every budget. Descending loops ensure
 // each available player can be selected only once.
-const roleFrontier = (players, count, budget, costFor) => {
+const roleFrontier = (players, count, budget, costFor, valueFor) => {
   const dp = Array.from({ length: count + 1 }, () => {
     const row = new Float64Array(budget + 1);
     row.fill(EMPTY);
@@ -235,7 +235,7 @@ const roleFrontier = (players, count, budget, costFor) => {
   for (const player of players) {
     const cost = costFor(player);
     if (cost > budget) continue;
-    const value = contribution(player);
+    const value = valueFor(player);
     for (let selected = count; selected >= 1; selected--) {
       const current = dp[selected];
       const previous = dp[selected - 1];
@@ -256,13 +256,13 @@ const roleFrontier = (players, count, budget, costFor) => {
   return result;
 };
 
-const completionFrontier = (pool, needs, budget, costFor) => {
+const completionFrontier = (pool, needs, budget, costFor, valueFor) => {
   let combined = new Float64Array(budget + 1);
   combined.fill(0);
   for (const role of Object.keys(needs)) {
     if (!needs[role]) continue;
     const rolePlayers = pool.filter((player) => player.ruolo === role);
-    const roleValues = roleFrontier(rolePlayers, needs[role], budget, costFor);
+    const roleValues = roleFrontier(rolePlayers, needs[role], budget, costFor, valueFor);
     const next = new Float64Array(budget + 1);
     next.fill(EMPTY);
     for (let credits = 0; credits <= budget; credits++) {
@@ -341,12 +341,13 @@ export const evaluateOverview = (data = {}) => {
   const costFor = (item) =>
     estimatedCost(item, market, scarcity, valuation.normalizedFvm);
   const budgetPlan = roleBudgetPlan(records, ownerIndex, needs, rules);
+  const valueFor = (player) => contribution(player, rules);
 
   const plans = Object.fromEntries(
     roles.map((role) => {
       const available = pool.filter((item) => item.ruolo === role);
       const planned = available
-        .map((item) => ({ value: contribution(item), cost: costFor(item) }))
+        .map((item) => ({ value: valueFor(item), cost: costFor(item) }))
         .sort((a, b) => b.value - a.value || a.cost - b.cost)
         .slice(0, needs[role]);
       return [
@@ -488,13 +489,14 @@ export const evaluateAuction = (data = {}) => {
     competition[player.ruolo],
   );
   const budgetPlan = roleBudgetPlan(records, ownerIndex, needs, rules);
+  const valueFor = (item) => contribution(item, rules);
   const roleBidCap = budgetPlan[player.ruolo].bidCap;
 
   const roleAlternatives = pool
     .filter((item) => item.ruolo === player.ruolo)
     .map((item) => ({
       player: item,
-      value: contribution(item),
+      value: valueFor(item),
       estimatedCost: costFor(item),
     }))
     .sort((a, b) => b.value - a.value || a.estimatedCost - b.estimatedCost);
@@ -504,7 +506,7 @@ export const evaluateAuction = (data = {}) => {
     : null;
   const replacement =
     replacementIndex == null ? null : roleAlternatives[replacementIndex];
-  const candidateValue = contribution(player);
+  const candidateValue = valueFor(player);
   const marginalValue = candidateValue - finite(replacement?.value);
   const opponents = competition[player.ruolo];
   const qualityEdge = replacement
@@ -521,9 +523,9 @@ export const evaluateAuction = (data = {}) => {
         ) *
           rules.auction.increment;
 
-  const baseline = completionFrontier(pool, needs, credits, costFor);
+  const baseline = completionFrontier(pool, needs, credits, costFor, valueFor);
   const withNeeds = { ...needs, [player.ruolo]: needs[player.ruolo] - 1 };
-  const withCandidate = completionFrontier(pool, withNeeds, credits, costFor);
+  const withCandidate = completionFrontier(pool, withNeeds, credits, costFor, valueFor);
   const baselineValue = baseline[credits];
   const baselineFeasible = baselineValue > EMPTY / 2;
   let maxBid = 0;
@@ -609,7 +611,7 @@ export const evaluateAuction = (data = {}) => {
     roles.map((role) => {
       const available = pool.filter((item) => item.ruolo === role);
       const planned = available
-        .map((item) => ({ value: contribution(item), cost: costFor(item) }))
+        .map((item) => ({ value: valueFor(item), cost: costFor(item) }))
         .sort((a, b) => b.value - a.value || a.cost - b.cost)
         .slice(0, needs[role]);
       return [
@@ -684,6 +686,7 @@ export const evaluateAuction = (data = {}) => {
       opponentDemand: opponents.needing,
       opponentAffordable: opponents.affordable,
       deterministic: true,
+      horizon: rules.horizons.currentLeague.label,
     },
   };
 };

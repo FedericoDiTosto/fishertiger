@@ -73,6 +73,7 @@ export const normalizeRules = (input = {}) => {
   const virtualGoals = object(source.virtualGoals || source.virtual_goals || source.gol_virtuali);
   const defense = object(source.defenseModifier || source.defense_modifier || source.modificatore_difesa);
   const standings = object(source.standings || source.classifica);
+  const horizons = object(source.horizons || source.orizzonti);
   const validTieBreakers = new Set(["goal_difference", "head_to_head", "season_fantasy_score"]);
   const requestedTieBreakers = Array.isArray(standings.tieBreakers || standings.tie_breakers) ? standings.tieBreakers || standings.tie_breakers : LEGACY_RULES.standings.tieBreakers;
   const tieBreakers = [...new Set(requestedTieBreakers.filter((rule) => validTieBreakers.has(rule)))];
@@ -112,5 +113,9 @@ export const normalizeRules = (input = {}) => {
           : LEGACY_RULES.auction.roleBudgetFlexibilityPercent,
     },
     calendar: source.calendario_lega ?? source.calendar,
+    horizons: {
+      historical: { matchdays: integer(object(horizons.historical).matchdays, 38, 1), label: object(horizons.historical).label || `storico ${integer(object(horizons.historical).matchdays, 38, 1)}` },
+      currentLeague: { matchdayIndices: Array.isArray(object(horizons.currentLeague).matchdayIndices) ? object(horizons.currentLeague).matchdayIndices.filter((day) => Number.isInteger(day) && day >= 0) : [], label: object(horizons.currentLeague).label || "lega corrente" },
+    },
   };
 };
