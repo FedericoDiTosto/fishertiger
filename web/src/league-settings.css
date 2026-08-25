@@ -1,0 +1,627 @@
+.league-settings {
+  --ink: #e8eee7;
+  --muted: #aeb9b0;
+  --line: #405046;
+  --paper: transparent;
+  --panel: #151d18;
+  --panel-raised: #1c2821;
+  --input: #101512;
+  --lime: #d8f0a0;
+  --lime-ink: #112014;
+  --danger: #d38372;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0;
+  color: var(--ink);
+  background: var(--paper);
+  font:
+    16px/1.45 Inter,
+    ui-sans-serif,
+    system-ui,
+    sans-serif;
+}
+.ls-header {
+  max-width: 650px;
+  padding-bottom: 8px;
+  margin-bottom: 24px;
+}
+.ls-kicker {
+  margin: 0;
+  color: var(--lime);
+  font:
+    700 12px ui-monospace,
+    monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.ls-header h1 {
+  margin: 8px 0 18px;
+  font-size: clamp(36px, 5vw, 64px);
+  line-height: 0.98;
+  letter-spacing: -0.065em;
+}
+.ls-header p:last-child {
+  margin: 0;
+  color: var(--muted);
+}
+.ls-status {
+  min-height: 1.5em;
+  margin: 12px 0;
+  color: var(--lime);
+  font-weight: 700;
+}
+.ls-status:empty {
+  display: none;
+}
+.ls-errors {
+  border: 1px solid var(--danger);
+  border-radius: 9px;
+  background: #402923;
+  padding: 14px 18px;
+  margin: 18px 0;
+}
+.ls-errors ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+.league-settings fieldset {
+  min-width: 0;
+  margin: 28px 0;
+  padding: 26px 22px 24px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.league-settings legend {
+  padding: 0 8px;
+  font-size: 20px;
+  font-weight: 800;
+}
+.league-settings legend span {
+  display: inline-grid;
+  place-items: center;
+  width: 27px;
+  height: 27px;
+  margin-right: 8px;
+  background: var(--lime);
+  color: var(--lime-ink);
+  border-radius: 5px;
+  font:
+    700 12px ui-monospace,
+    monospace;
+}
+.ls-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 14px;
+}
+.ls-grid > * {
+  align-self: start;
+}
+.ls-field,
+.league-settings label:not(.ls-check) {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  font-weight: 700;
+}
+.ls-field input,
+.ls-field select,
+.ls-source input,
+.ls-source select,
+.ls-team input,
+.ls-payouts input,
+.ls-tier input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #526258;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--ink);
+  background: var(--input);
+  font: inherit;
+}
+.ls-field input:focus,
+.ls-field select:focus,
+.ls-source input:focus,
+.ls-source select:focus,
+.ls-team input:focus,
+.ls-payouts input:focus,
+.ls-tier input:focus {
+  outline: 3px solid #cbff8b;
+  outline-offset: 1px;
+  border-color: var(--lime);
+}
+.ls-range {
+  display: grid;
+  gap: 10px;
+  grid-column: 1 / -1;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-raised);
+}
+.ls-range-label {
+  color: var(--ink) !important;
+}
+.ls-dual-range {
+  position: relative;
+  height: 34px;
+}
+.ls-dual-range::before,
+.ls-dual-range::after {
+  position: absolute;
+  top: 50%;
+  height: 8px;
+  transform: translateY(-50%);
+  content: "";
+}
+.ls-dual-range::before {
+  right: 0;
+  left: 0;
+  border-radius: 999px;
+  background: #405046;
+}
+.ls-dual-range::after {
+  left: var(--range-start);
+  width: calc(var(--range-end) - var(--range-start));
+  border-radius: 999px;
+  background: var(--lime);
+}
+.ls-dual-range input[type="range"] {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 34px;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  pointer-events: none;
+  background: transparent;
+}
+.ls-dual-range .ls-range-end {
+  z-index: 2;
+}
+.ls-dual-range input[type="range"]::-webkit-slider-runnable-track {
+  height: 8px;
+  background: transparent;
+}
+.ls-dual-range input[type="range"]::-moz-range-track {
+  height: 8px;
+  background: transparent;
+}
+.ls-dual-range input[type="range"]::-webkit-slider-thumb {
+  width: 22px;
+  height: 22px;
+  margin-top: -7px;
+  border: 3px solid var(--lime-ink);
+  border-radius: 50%;
+  appearance: none;
+  pointer-events: auto;
+  background: var(--lime);
+  cursor: grab;
+}
+.ls-dual-range input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 3px solid var(--lime-ink);
+  border-radius: 50%;
+  pointer-events: auto;
+  background: var(--lime);
+  cursor: grab;
+}
+.ls-dual-range input[type="range"]:active::-webkit-slider-thumb,
+.ls-dual-range input[type="range"]:active::-moz-range-thumb {
+  cursor: grabbing;
+}
+.ls-dual-range input[type="range"]:focus-visible {
+  outline: none;
+}
+.ls-dual-range input[type="range"]:focus-visible::-webkit-slider-thumb {
+  outline: 3px solid #cbff8b;
+  outline-offset: 3px;
+}
+.ls-dual-range input[type="range"]:focus-visible::-moz-range-thumb {
+  outline: 3px solid #cbff8b;
+  outline-offset: 3px;
+}
+.ls-range-values {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 18px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 800;
+}
+.ls-range p {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 700;
+}
+.ls-subheading {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 28px 0 12px;
+}
+.ls-subheading h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.ls-subheading h4 {
+  margin: 0;
+  font-size: 14px;
+}
+.ls-subheading span {
+  color: var(--muted);
+  font-size: 14px;
+}
+.ls-text-button,
+.ls-remove {
+  border: 0;
+  background: transparent;
+  color: var(--lime);
+  text-decoration: none;
+  font-weight: 800;
+  padding: 4px;
+}
+.ls-text-button:disabled,
+.ls-remove:disabled {
+  color: #77857b;
+  cursor: not-allowed;
+}
+.ls-source {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 14px;
+  align-items: center;
+  border-top: 1px solid var(--line);
+  padding: 14px 0;
+}
+.ls-source-identity {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+.ls-source-identity span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ls-source-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 112px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+.ls-source-status i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #77857b;
+}
+.ls-source-status.present {
+  color: var(--lime);
+}
+.ls-source-status.present i {
+  background: var(--lime);
+}
+.ls-source-status.missing {
+  color: #f1b7a8;
+}
+.ls-source-status.missing i {
+  background: var(--danger);
+}
+.ls-source-status.uploading i,
+.ls-source-status.checking i {
+  background: #d8be68;
+}
+.league-settings .ls-upload {
+  position: relative;
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid #55715e;
+  border-radius: 7px;
+  padding: 8px 14px;
+  background: #263a2d;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+}
+.ls-upload:hover {
+  border-color: var(--lime);
+  background: #355541;
+}
+.ls-upload input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.ls-upload:has(input:focus-visible) {
+  outline: 3px solid #cbff8b;
+  outline-offset: 2px;
+}
+.ls-upload:has(input:disabled) {
+  cursor: wait;
+  opacity: 0.65;
+}
+.ls-source label,
+.ls-team label,
+.ls-payouts label,
+.ls-tier label {
+  font-size: 13px;
+}
+.ls-field-help {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+}
+.league-settings .ls-check {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  min-height: 25px;
+  font-weight: 700;
+}
+.ls-check input {
+  width: 19px;
+  height: 19px;
+  accent-color: var(--lime);
+}
+.ls-team-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+.ls-team,
+.ls-tier {
+  display: flex;
+  gap: 8px;
+  align-items: end;
+}
+.ls-team > *,
+.ls-tier > * {
+  min-width: 0;
+}
+.ls-team label,
+.ls-tier label {
+  flex: 1;
+}
+.ls-select {
+  max-width: 360px;
+}
+.ls-team-list + .ls-select,
+.ls-payouts + .ls-select {
+  margin-top: 18px;
+}
+.ls-payouts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(110px, 1fr));
+  gap: 10px;
+}
+.ls-payouts > label {
+  align-self: start;
+}
+.ls-slots,
+.ls-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.ls-formation-group {
+  margin-top: 18px;
+}
+.ls-formation-group .ls-options {
+  flex-wrap: wrap;
+  overflow-x: visible;
+}
+.ls-formation-group .ls-check {
+  flex: 0 0 auto;
+}
+.ls-formation-group .ls-subheading {
+  margin: 0;
+}
+.ls-formation-help {
+  margin: 12px 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+.ls-static-rule {
+  margin-top: 24px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-raised);
+}
+.ls-static-rule strong {
+  color: var(--lime);
+}
+.ls-static-rule p {
+  max-width: 760px;
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.ls-static-rule code {
+  color: var(--ink);
+}
+.ls-slots .ls-field {
+  width: 120px;
+}
+.ls-options {
+  padding: 6px 0;
+}
+.ls-options .ls-check {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 10px;
+  background: var(--panel-raised);
+}
+.ls-label {
+  margin: 20px 0 4px;
+  font-weight: 800;
+}
+.ls-choice-card {
+  margin-top: 22px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-raised);
+}
+.ls-choice-card .ls-label {
+  margin-top: 0;
+}
+.ls-choice-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.ls-priority-choice,
+.ls-invalid-choice {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 2fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.ls-invalid-choice {
+  margin-top: 8px;
+  border-color: var(--danger);
+  color: #f1b7a8;
+  font-weight: 800;
+}
+.ls-order-actions {
+  display: flex;
+  gap: 5px;
+}
+.ls-order-actions button {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #263429;
+  color: var(--ink);
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+.ls-order-actions button:focus-visible {
+  outline: 3px solid #cbff8b;
+  outline-offset: 2px;
+}
+.ls-toggle {
+  margin-top: 24px;
+  font-size: 16px;
+}
+.ls-toggle + .ls-grid,
+.ls-choice-card + .ls-grid {
+  margin-top: 18px;
+}
+.ls-tier {
+  max-width: 620px;
+  margin: 12px 0;
+}
+.ls-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0 28px;
+}
+.ls-actions p {
+  flex: 1 1 280px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+.ls-actions button {
+  min-height: 46px;
+  border: 1px solid var(--lime);
+  border-radius: 8px;
+  padding: 10px 18px;
+  background: var(--lime);
+  color: var(--lime-ink);
+  font-weight: 900;
+}
+.ls-actions .ls-generate {
+  border-color: #55715e;
+  background: #263a2d;
+  color: var(--ink);
+}
+.ls-actions button:disabled {
+  border-color: var(--line);
+  background: #202a23;
+  color: #77857b;
+  cursor: not-allowed;
+}
+.ls-actions button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+}
+.ls-actions button:focus-visible,
+.ls-text-button:focus-visible,
+.ls-remove:focus-visible {
+  outline: 3px solid #cbff8b;
+  outline-offset: 3px;
+}
+@media (max-width: 700px) {
+  .league-settings {
+    padding: 0;
+  }
+  .ls-grid,
+  .ls-team-list {
+    grid-template-columns: 1fr;
+  }
+  .ls-range {
+    grid-column: auto;
+  }
+  .ls-range-values {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .ls-source {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+  .ls-priority-choice,
+  .ls-invalid-choice {
+    grid-template-columns: 1fr;
+  }
+  .ls-source-status,
+  .league-settings .ls-upload {
+    justify-self: start;
+  }
+  .ls-payouts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .league-settings fieldset {
+    margin: 24px 0;
+    padding: 20px 16px 18px;
+  }
+  .ls-subheading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+  }
+}
