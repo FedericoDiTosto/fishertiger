@@ -130,7 +130,7 @@ function App() {
     try {
       const savedProfile = await saveProfile(nextProfile, { apiBase });
       if (!generate) {
-        setProfile(savedProfile);
+       setProfile(payload.profile || savedProfile);
         return;
       }
       const response = await fetch(`${apiBase}/api/generate`, {
@@ -225,6 +225,15 @@ function App() {
         </section>
       </main>
     );
+  const datasetProfileHash = data.meta?.profile?.profile_hash;
+  const datasetState = datasetProfileHash && datasetProfileHash !== profile.configuration_hash
+    ? "dataset da rigenerare"
+    : data.meta?.profile?.source_fingerprints?.some((source) => source.exists === false)
+      ? "fonti cambiate"
+      : "dataset corrente";
+  const simulationState = season?.meta?.dataset_input_hash && season.meta.dataset_input_hash === data.meta?.profile?.dataset_input_hash
+    ? "simulazione corrente"
+    : "simulazione da aggiornare";
   return (
     <main className="app-shell">
       <header className="app-header">
@@ -264,12 +273,12 @@ function App() {
             </button>
           ))}
         </nav>
-        <div className="data-status">
+        <div className={`data-status ${datasetState === "dataset corrente" ? "current" : "stale"}`}>
           <i />
-          Dati aggiornati
+          {datasetState}
           <br />
           <small>
-            {generationStatus || data.meta?.generato_il?.slice(0, 10) || "profilo locale"}
+            {generationStatus || `${simulationState} · ${data.meta?.generato_il?.slice(0, 10) || "profilo locale"}`}
           </small>
           <button
             className="regenerate-data"

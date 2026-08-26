@@ -9,6 +9,7 @@ import {
   supportedValues,
   tieBreakers,
 } from "./league-settings-policies.js";
+import { profileChangePolicy } from "./profile-change-policy.js";
 
 const roles = ["P", "D", "C", "A"];
 const roleBudgetLabels = {
@@ -379,6 +380,7 @@ export function LeagueSettings({
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [sourceStatuses, setSourceStatuses] = useState({});
+  const changePolicy = profileChangePolicy(mergeProfile(initialProfile, leagueCalendar), profile);
   const errorRef = useRef(null);
   const endpoint = (path) => `${apiBase.replace(/\/$/, "")}${path}`;
   const sourceSignature = JSON.stringify(
@@ -395,6 +397,15 @@ export function LeagueSettings({
   useEffect(() => {
     setProfile(mergeProfile(initialProfile, leagueCalendar));
   }, [initialProfile, leagueCalendar]);
+  useEffect(() => {
+    if (!changePolicy.dirty) return undefined;
+    const warn = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [changePolicy.dirty]);
   useEffect(() => {
     if (initialProfile || !profile.profile_id) return undefined;
     const controller = new AbortController();
@@ -541,7 +552,9 @@ export function LeagueSettings({
         setStatus(
           generate
             ? "Dati rigenerati per questo profilo."
-            : "Profilo aggiornato localmente.",
+            : changePolicy.action === "rerun_simulation"
+              ? "Profilo salvato: riesegui la simulazione per aggiornare i risultati."
+              : "Profilo aggiornato.",
         );
         return;
       }
@@ -1315,6 +1328,19 @@ export function LeagueSettings({
         </div>
       </fieldset>
       <footer className="ls-actions">
+        {changePolicy.dirty && (
+          <aside className="ls-change-warning" role="status">
+            <strong>Modifiche non applicate</strong>
+            <span>{changePolicy.fields.join(", ")}</span>
+            <small>
+              Azione consigliata: {changePolicy.action === "regenerate_dataset"
+                ? "salva e rigenera dati"
+                : changePolicy.action === "rerun_simulation"
+                  ? "salva e riesegui simulazione"
+                  : "salva modifiche"}.
+            </small>
+          </aside>
+        )}
         <p>
           {sourcesReady
             ? "Le fonti necessarie sono presenti. Il calendario della lega è facoltativo."
