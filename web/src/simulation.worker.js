@@ -4,6 +4,7 @@ import {
   projectedContribution,
   sourceFvm,
 } from "./player-valuation.js";
+import { expectedDefenseModifier } from "./defense-modifier.js";
 const EMPTY = -1e15;
 
 const finite = (value, fallback = 0) =>
@@ -16,6 +17,28 @@ const playerKey = (player) =>
     : String(player.id);
 
 const contribution = (player, rules) => projectedContribution(player, rules.horizons?.currentLeague?.matchdayIndices);
+
+const defenseProfile = (player) => ({
+  probability: Array.isArray(player?.p_gioca_per_giornata) && player.p_gioca_per_giornata.length
+    ? player.p_gioca_per_giornata.reduce((sum, value) => sum + finite(value), 0) / player.p_gioca_per_giornata.length
+    : finite(player?.proiezione?.p_gioca),
+  vote: Array.isArray(player?.voto_puro_mean_per_giornata) && player.voto_puro_mean_per_giornata.length
+    ? player.voto_puro_mean_per_giornata.reduce((sum, value) => sum + finite(value), 0) / player.voto_puro_mean_per_giornata.length
+    : finite(player?.proiezione?.voto_puro),
+});
+
+const defenseValue = (roster, rules) => {
+  if (!rules.defenseModifier.enabled) return 0;
+  const goalkeepers = roster.filter((item) => item.ruolo === "P").sort((a, b) => defenseProfile(b).vote - defenseProfile(a).vote);
+  const defenders = roster.filter((item) => item.ruolo === "D").sort((a, b) => defenseProfile(b).vote - defenseProfile(a).vote);
+  const goalkeeper = goalkeepers[0];
+  if (!goalkeeper || defenders.length < rules.defenseModifier.requiredDefenders) return 0;
+  return expectedDefenseModifier({
+    ...rules.defenseModifier,
+    goalkeeper: defenseProfile(goalkeeper),
+    defenders: defenders.map(defenseProfile),
+  });
+};
 
 const roleNeeds = (team, rules) =>
   Object.fromEntries(
@@ -507,7 +530,14 @@ export const evaluateAuction = (data = {}) => {
   const replacement =
     replacementIndex == null ? null : roleAlternatives[replacementIndex];
   const candidateValue = valueFor(player);
-  const marginalValue = candidateValue - finite(replacement?.value);
+  const individualMarginalValue = candidateValue - finite(replacement?.value);
+  const currentDefenseValue = defenseValue(team.roster || [], rules);
+  const candidateDefenseValue = defenseValue([...(team.roster || []), player], rules);
+  const alternativeDefenseValue = replacement
+    ? defenseValue([...(team.roster || []), replacement.player], rules)
+    : currentDefenseValue;
+  const defenseMarginalValue = candidateDefenseValue - alternativeDefenseValue;
+  const marginalValue = individualMarginalValue + defenseMarginalValue;
   const opponents = competition[player.ruolo];
   const qualityEdge = replacement
     ? marginalValue / Math.max(1, candidateValue, replacement.value)
@@ -575,7 +605,8 @@ export const evaluateAuction = (data = {}) => {
     replacement
       ? `${rounded(candidateValue)} punti proiettati; margine di ${rounded(marginalValue)} sul cutoff del ruolo (${replacementIndex + 1}° tra i disponibili).`
       : `${rounded(candidateValue)} punti proiettati; nessuna alternativa disponibile nel ruolo.`,
-    `Limite ancorato al mercato a ${candidateCost} crediti, corretto per qualità relativa e fattibilità del completamento.`,
+     `Margine corretto: ${rounded(individualMarginalValue)} punti individuali + ${rounded(defenseMarginalValue)} punti modificatore difesa.`,
+     `Limite ancorato al mercato a ${candidateCost} crediti, corretto per qualità relativa e fattibilità del completamento.`,
     `Completamento ottimizzato rispettando ${openSlots} slot aperti e la riserva minima di ${Math.max(0, openSlots - 1) * rules.auction.reserve} crediti dopo l'acquisto.`,
     `Mercato osservato a ${market.inflation.toFixed(2)}x (${market.records.length} assegnazioni); ruolo ${player.ruolo} a ${market.roleInflation[player.ruolo].toFixed(2)}x.`,
     `${opponents.needing} avversari hanno ancora bisogno del ruolo; ${opponents.affordable} possono offrire almeno un credito oltre le proprie riserve.`,
@@ -663,7 +694,11 @@ export const evaluateAuction = (data = {}) => {
       slotsOpen: openSlots,
       reservedCredits:
         Math.max(0, openSlots - 1) * rules.auction.reserve,
-      candidateValue: rounded(candidateValue),
+       candidateValue: rounded(candidateValue),
+       individualMarginalValue: rounded(individualMarginalValue),
+       defenseMarginalValue: rounded(defenseMarginalValue),
+       defenseValueBefore: rounded(currentDefenseValue),
+       defenseValueWithCandidate: rounded(candidateDefenseValue),
       replacementValue: rounded(replacement?.value),
       replacementRank: replacementIndex == null ? null : replacementIndex + 1,
       marginalValue: rounded(marginalValue),
