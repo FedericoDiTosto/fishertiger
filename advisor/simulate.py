@@ -7,15 +7,20 @@ from pathlib import Path
 from .config import LeagueConfig
 from .league_profile import LeagueProfile
 from .simulation import make_sample_rosters, simulate_season
+from .freshness import SIMULATOR_VERSION, simulation_input_hash
 
 
-def run_simulation(output_dir: Path, *, iterations: int = 1000, seed: int = 202627, league: LeagueConfig | None = None) -> dict:
+def run_simulation(output_dir: Path, *, iterations: int = 1000, seed: int = 202627, league: LeagueConfig | None = None, profile: LeagueProfile | None = None) -> dict:
     """Simulate the current dataset and replace its previous season report."""
     league = league or LeagueConfig()
     payload = json.loads((output_dir / "auction_data.json").read_text())
+    metadata = payload.get("meta", {}).get("profile") or {}
+    expected_dataset_hash = metadata.get("dataset_input_hash")
+    if profile is not None and expected_dataset_hash is None:
+        raise ValueError("Dataset metadata is missing; regenerate the dataset before simulating")
     rosters = make_sample_rosters(payload, league)
     result = simulate_season(payload, rosters, iterations=iterations, seed=seed, league=league)
-    output = {"iterations": result.iterations, "teams": result.teams, "scenarios": result.scenarios, "diagnostics": result.diagnostics, "rosters": rosters}
+    output = {"iterations": result.iterations, "teams": result.teams, "scenarios": result.scenarios, "diagnostics": result.diagnostics, "rosters": rosters, "meta": {"dataset_input_hash": expected_dataset_hash, "simulation_input_hash": simulation_input_hash(expected_dataset_hash or "", profile) if profile else None, "seed": seed, "iterations": iterations, "simulator_version": SIMULATOR_VERSION}}
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "season_simulation.json").write_text(json.dumps(output, indent=2))
     return output
@@ -49,7 +54,7 @@ def main(argv: list[str] | None = None) -> None:
     profile = LeagueProfile.load_json(args.profile) if args.profile else None
     league = LeagueConfig.from_profile(profile) if profile else LeagueConfig()
     output_dir = args.output_dir / profile.profile_id / profile.season.season.replace("/", "-") if profile else args.output_dir
-    output = run_simulation(output_dir, iterations=args.iterations, seed=args.seed, league=league)
+    output = run_simulation(output_dir, iterations=args.iterations, seed=args.seed, league=league, profile=profile)
     if args.web_export_dir:
         args.web_export_dir.mkdir(parents=True, exist_ok=True)
         payload = json.loads((output_dir / "auction_data.json").read_text())
