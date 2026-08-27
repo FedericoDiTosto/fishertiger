@@ -33,10 +33,24 @@ export const auctionDatasetPath = (profile) => {
 export const seasonSimulationPath = (profile) =>
   auctionDatasetPath(profile).replace("auction_data.json", "season_simulation.json");
 
+export const isValidProfileId = (value) =>
+  typeof value === "string" && /^[A-Za-z0-9_-]+$/.test(value);
+
 const profileId = (value) => {
-  if (typeof value !== "string" || !/^[A-Za-z0-9_-]+$/.test(value))
+  if (!isValidProfileId(value))
     fail("invalid_profile_id", "Profile IDs may contain only letters, numbers, underscores, and hyphens.");
   return value;
+};
+
+export const datasetPathError = (profile) => {
+  try {
+    auctionDatasetPath(profile);
+    return "";
+  } catch (error) {
+    if (error instanceof ProfileClientError && error.code === "invalid_profile_id")
+      return "ID profilo non valido: sono ammessi solo lettere, numeri, underscore e trattini.";
+    return "Profilo non valido: ID e stagione sono obbligatori.";
+  }
 };
 
 async function requestJson(url, { fetchImpl = globalThis.fetch, ...options } = {}) {
@@ -83,6 +97,28 @@ export const saveProfile = async (profile, options = {}) => {
     body: JSON.stringify(value),
   });
 };
+
+/** Parse a profile file chosen by the user. Rejects anything the API would refuse
+ *  anyway, so the failure is reported before a request is made. */
+export const parseProfileJson = (text) => {
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch (cause) {
+    fail("invalid_profile_file", "Il file non contiene JSON valido.", { cause });
+  }
+  if (!isObject(value)) fail("invalid_profile_file", "Il file deve contenere un oggetto JSON.");
+  if (typeof value.profile_id !== "string" || !value.profile_id.trim())
+    fail("invalid_profile_file", "Il file non sembra un profilo: manca profile_id.");
+  profileId(value.profile_id);
+  return value;
+};
+
+export const deleteProfile = async (id, options = {}) =>
+  requestJson(apiUrl(`/api/profiles/${encodeURIComponent(profileId(id))}`, options.apiBase), {
+    ...options,
+    method: "DELETE",
+  });
 
 export const generateProfile = async (profileOrId, options = {}) => {
   const request = typeof profileOrId === "string"
@@ -194,12 +230,12 @@ export const rulesFor = (profile, data = {}) => {
       roleBudgetPercentages: pick(
         auction.role_budget_percentages,
         object(fallback.auction).roleBudgetPercentages ||
-          object(fallback.auction).role_budget_percentages,
+        object(fallback.auction).role_budget_percentages,
       ),
       roleBudgetFlexibilityPercent: pick(
         auction.role_budget_flexibility_percent,
         object(fallback.auction).roleBudgetFlexibilityPercent ??
-          object(fallback.auction).role_budget_flexibility_percent,
+        object(fallback.auction).role_budget_flexibility_percent,
       ),
     },
     calendar: dataset.calendario_lega || dataset.calendar || fallback.calendario_lega || fallback.calendar,

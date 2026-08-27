@@ -1,0 +1,76 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createRequestGate } from "../src/latest-request.js";
+
+test("only the newest claim is current", () => {
+  const gate = createRequestGate();
+  const first = gate.claim();
+  assert.equal(gate.isCurrent(first), true);
+  const second = gate.claim();
+  assert.equal(gate.isCurrent(first), false);
+  assert.equal(gate.isCurrent(second), true);
+});
+
+test("a request never becomes current again once superseded", () => {
+  const gate = createRequestGate();
+  const stale = gate.claim();
+  gate.claim();
+  gate.claim();
+  assert.equal(gate.isCurrent(stale), false);
+});
+
+test("a reply that lands after a switch is rejected, the newer one is kept", () => {
+  const gate = createRequestGate();
+  const generateA = gate.claim();
+  const selectB = gate.claim();
+  assert.equal(gate.isCurrent(generateA), false, "A's dataset must be dropped");
+  assert.equal(gate.isCurrent(selectB), true, "B stays the active profile");
+});
+
+test("out-of-order completion: the slow earlier load loses to the fast later one", () => {
+  const gate = createRequestGate();
+  const loadA = gate.claim();
+  const loadB = gate.claim();
+  assert.equal(gate.isCurrent(loadB), true, "B commits when it answers");
+  assert.equal(
+    gate.isCurrent(loadA),
+    false,
+    "A must not overwrite the stored id or the active profile when it answers last",
+  );
+});
+
+test("latest() observes the request in force without superseding it", () => {
+  const gate = createRequestGate();
+  const generation = gate.claim();
+  const simulation = gate.latest();
+  assert.equal(simulation, generation);
+  assert.equal(gate.isCurrent(generation), true, "the generation still commits");
+  assert.equal(gate.isCurrent(simulation), true, "so does the simulation");
+});
+
+test("an observed request goes stale on the next profile switch", () => {
+  const gate = createRequestGate();
+  gate.claim();
+  const simulation = gate.latest();
+  gate.claim();
+  assert.equal(gate.isCurrent(simulation), false);
+});
+
+test("latest() is zero before anything is claimed, and matches nothing pending", () => {
+  const gate = createRequestGate();
+  assert.equal(gate.latest(), 0);
+  assert.equal(gate.isCurrent(gate.latest()), true);
+});
+
+test("gates are independent", () => {
+  const one = createRequestGate();
+  const two = createRequestGate();
+  const request = one.claim();
+  two.claim();
+  two.claim();
+  assert.equal(one.isCurrent(request), true);
+});
+
+test("nothing is current before the first claim", () => {
+  assert.equal(createRequestGate().isCurrent(1), false);
+});

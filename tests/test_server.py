@@ -56,10 +56,11 @@ class LocalApiServerTests(unittest.TestCase):
         return response, json.loads(payload) if payload else None
 
     def test_profiles_round_trip_and_index(self):
+        expected = {**self.profile, "configuration_hash": LeagueProfile.from_dict(self.profile).configuration_hash}
         body = json.dumps(self.profile).encode("utf-8")
         response, payload = self.request("PUT", "/api/profiles/my-team", body, {"Content-Type": "application/json"})
         self.assertEqual(response.status, 200)
-        self.assertEqual(payload, self.profile)
+        self.assertEqual(payload, expected)
 
         response, payload = self.request("GET", "/api/profiles")
         self.assertEqual(response.status, 200)
@@ -67,7 +68,21 @@ class LocalApiServerTests(unittest.TestCase):
 
         response, payload = self.request("GET", "/api/profiles/my-team")
         self.assertEqual(response.status, 200)
-        self.assertEqual(payload, self.profile)
+        self.assertEqual(payload, expected)
+
+    def test_profile_responses_carry_the_hash_the_dataset_metadata_uses(self):
+        """The UI compares meta.profile.profile_hash with the profile's own hash to
+        flag a stale dataset, so the API has to expose it and stay stable when the
+        browser sends the annotated profile back."""
+        body = json.dumps(self.profile).encode("utf-8")
+        _, saved = self.request("PUT", "/api/profiles/my-team", body, {"Content-Type": "application/json"})
+        self.assertEqual(saved["configuration_hash"], LeagueProfile.from_dict(self.profile).configuration_hash)
+        _, fetched = self.request("GET", "/api/profiles/my-team")
+        self.assertEqual(fetched["configuration_hash"], saved["configuration_hash"])
+        _, resaved = self.request("PUT", "/api/profiles/my-team", json.dumps(saved).encode("utf-8"), {"Content-Type": "application/json"})
+        self.assertEqual(resaved, saved)
+        stored = json.loads((self.server.profiles_dir / "my-team.json").read_text(encoding="utf-8"))
+        self.assertNotIn("configuration_hash", stored)
 
     def test_rejects_unsafe_names_and_invalid_json_boundaries(self):
         response, payload = self.request("PUT", "/api/profiles/%2E%2E", b'{}', {"Content-Type": "application/json"})
@@ -127,11 +142,38 @@ class LocalApiServerTests(unittest.TestCase):
         response, payload = self.request("OPTIONS", "/api/generate", headers={"Origin": "http://127.0.0.1:5173"})
         self.assertEqual(response.status, 204)
         self.assertIsNone(payload)
-        self.assertEqual(response.getheader("Access-Control-Allow-Methods"), "GET, PUT, POST, OPTIONS")
+        self.assertEqual(response.getheader("Access-Control-Allow-Methods"), "GET, PUT, POST, DELETE, OPTIONS")
 
         response, payload = self.request("POST", "/api/generate", b'{}', {"Content-Type": "application/json"})
         self.assertEqual(response.status, 400)
         self.assertEqual(payload["error"]["code"], "invalid_profile")
+
+    def test_profiles_can_be_deleted_and_report_missing_names(self):
+        profile = {**self.profile, "profile_id": "throwaway"}
+        response, _ = self.request("PUT", "/api/profiles/throwaway", json.dumps(profile).encode("utf-8"), {"Content-Type": "application/json"})
+        self.assertEqual(response.status, 200)
+
+        response, payload = self.request("GET", "/api/profiles")
+        self.assertIn("throwaway", payload["profiles"])
+
+        response, payload = self.request("DELETE", "/api/profiles/throwaway")
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload, {"profile_id": "throwaway", "deleted": True})
+
+        response, payload = self.request("GET", "/api/profiles")
+        self.assertNotIn("throwaway", payload["profiles"])
+
+        response, payload = self.request("DELETE", "/api/profiles/throwaway")
+        self.assertEqual(response.status, 404)
+        self.assertEqual(payload["error"]["code"], "profile_not_found")
+
+        response, payload = self.request("DELETE", "/api/profiles/not%20a%20name")
+        self.assertEqual(response.status, 400)
+        self.assertEqual(payload["error"]["code"], "invalid_profile_name")
+
+        response, payload = self.request("DELETE", "/api/datasets/anything.json")
+        self.assertEqual(response.status, 404)
+        self.assertEqual(payload["error"]["code"], "not_found")
 
     def test_generation_reports_invalid_source_data(self):
         def invalid_generator(profile, datasets_dir):

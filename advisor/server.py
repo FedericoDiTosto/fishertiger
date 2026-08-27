@@ -8,7 +8,9 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 import tempfile
+import traceback
 from collections.abc import Callable
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -24,6 +26,14 @@ from .generate import (
     load_profile,
     resolve_profile,
 )
+
+
+def profile_response(profile: Any) -> dict[str, Any]:
+    """The profile as the browser needs it: stored fields plus the derived hash the
+    dataset carries in its metadata, so the UI can tell a stale dataset from a
+    current one. `from_dict` ignores the extra key on the way back, and `to_dict`
+    stays hash-free so `configuration_hash` cannot hash itself."""
+    return {**profile.to_dict(), "configuration_hash": profile.configuration_hash}
 
 
 MAX_BODY_BYTES = 1_000_000
@@ -76,6 +86,12 @@ class LocalApiServer(ThreadingHTTPServer):
         self.profile_loader = profile_loader
         super().__init__(address, LocalApiHandler)
 
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        """Stay quiet when a client drops the connection mid-response."""
+        if isinstance(sys.exc_info()[1], (ConnectionError, TimeoutError)):
+            return
+        super().handle_error(request, client_address)
+
 
 class LocalApiHandler(BaseHTTPRequestHandler):
     server: LocalApiServer
@@ -107,6 +123,13 @@ class LocalApiHandler(BaseHTTPRequestHandler):
         else:
             self._error(HTTPStatus.NOT_FOUND, "not_found", "The requested endpoint does not exist.")
 
+    def do_DELETE(self) -> None:
+        path = self._path()
+        if path.startswith("/api/profiles/"):
+            self._delete_profile(path.removeprefix("/api/profiles/"))
+        else:
+            self._error(HTTPStatus.NOT_FOUND, "not_found", "The requested endpoint does not exist.")
+
     def do_POST(self) -> None:
         if self._path() == "/api/sources/status":
             self._source_status()
@@ -135,6 +158,7 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_source_data", str(error))
             return
         except Exception:
+            traceback.print_exc(file=sys.stderr)
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "generation_failed", "Generation failed.")
             return
         else:
@@ -164,7 +188,11 @@ class LocalApiHandler(BaseHTTPRequestHandler):
         try:
             output_dir = self.server.datasets_dir / profile.profile_id / profile.season.season.replace("/", "-")
             result = self.server.simulator(profile, output_dir, iterations, seed)
+        except (FileNotFoundError, ValueError) as error:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_source_data", str(error))
+            return
         except Exception:
+            traceback.print_exc(file=sys.stderr)
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "simulation_failed", "Simulation failed.")
             return
         self._send_json(HTTPStatus.OK, result)
@@ -177,7 +205,7 @@ class LocalApiHandler(BaseHTTPRequestHandler):
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "default_profile_unavailable", "The default profile is unavailable.")
             return
-        self._send_json(HTTPStatus.OK, profile.to_dict())
+        self._send_json(HTTPStatus.OK, profile_response(profile))
 
     def _profile_index(self) -> None:
         directory = self.server.profiles_dir
@@ -206,7 +234,7 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "storage_error", "The stored profile is invalid or unreadable.")
             return
         try:
-            self._send_json(HTTPStatus.OK, self._derive_calendar_participants(profile).to_dict())
+            self._send_json(HTTPStatus.OK, profile_response(self._derive_calendar_participants(profile)))
         except (OSError, ValueError) as error:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_source_data", str(error))
 
@@ -233,7 +261,7 @@ class LocalApiHandler(BaseHTTPRequestHandler):
         except (OSError, TypeError, ValueError):
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "storage_error", "The profile could not be saved.")
             return
-        self._send_json(HTTPStatus.OK, profile.to_dict())
+        self._send_json(HTTPStatus.OK, profile_response(profile))
 
     def _put_upload(self, relative_path: str) -> None:
         parts = relative_path.split("/")
@@ -270,7 +298,7 @@ class LocalApiHandler(BaseHTTPRequestHandler):
         except OSError:
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "upload_failed", "The source file could not be stored.")
             return
-        self._send_json(HTTPStatus.OK, {"path": str(target), "filename": Path(filename).name, "size": content_length})
+        self._send_json(HTTPStatus.OK, {"path": target.as_posix(), "filename": Path(filename).name, "size": content_length})
 
     def _source_status(self) -> None:
         value = self._read_json_object()
@@ -338,7 +366,7 @@ class LocalApiHandler(BaseHTTPRequestHandler):
         except FileNotFoundError:
             self._error(HTTPStatus.NOT_FOUND, "dataset_not_found", "The dataset does not exist.")
             return
-        except (OSError, json.JSONDecodeError):
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "storage_error", "The dataset is invalid or unreadable.")
             return
         self._send_json(HTTPStatus.OK, value)
@@ -353,6 +381,21 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.BAD_REQUEST, "invalid_dataset_path", "Dataset paths must stay within dataset storage.")
             return None
         return candidate
+
+    def _delete_profile(self, name: str) -> None:
+        """Remove a stored profile; generated datasets are deliberately left in place."""
+        profile_path = self._profile_path(name)
+        if profile_path is None:
+            return
+        try:
+            profile_path.unlink()
+        except FileNotFoundError:
+            self._error(HTTPStatus.NOT_FOUND, "profile_not_found", "The profile does not exist.")
+            return
+        except OSError:
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "storage_error", "The profile could not be deleted.")
+            return
+        self._send_json(HTTPStatus.OK, {"profile_id": name, "deleted": True})
 
     def _profile_path(self, name: str) -> Path | None:
         if not PROFILE_NAME.fullmatch(name):
@@ -398,13 +441,16 @@ class LocalApiHandler(BaseHTTPRequestHandler):
         if origin and VITE_ORIGIN.fullmatch(origin):
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
-            self.send_header("Access-Control-Allow-Methods", "GET, PUT, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Methods", "GET, PUT, POST, DELETE, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Filename")
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         if body:
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except ConnectionError:
+                self.close_connection = True
 
     def log_message(self, format: str, *args: Any) -> None:
         """Keep the local API quiet; callers receive structured HTTP errors."""

@@ -1,13 +1,18 @@
-import { StrictMode, useEffect, useRef, useState } from "react";
+import { Component, StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { Download, Trash2, Upload } from "lucide-react";
 import "./index.css";
 import RandomAuctionView from "./random-auction.jsx";
 import { LeagueSettings } from "./league-settings.jsx";
 import { normalizeRules } from "./league-rules.js";
+import { createRequestGate } from "./latest-request.js";
+import { datasetFreshness, simulationFreshness } from "./dataset-freshness.js";
 import { activeNominationRole } from "./auction-nomination.js";
 import {
   auctionStorageKey,
+  draftPlayer,
   emptyAuction,
+  emptyDraft,
   isValidBid,
   legalMaxBid,
   playerIdKey,
@@ -18,7 +23,12 @@ import {
 import {
   apiUrl,
   auctionDatasetPath,
+  datasetPathError,
+  deleteProfile,
+  listProfiles,
+  parseProfileJson,
   loadDatasetUrl,
+  loadProfile,
   rulesFor,
   saveProfile,
   seasonSimulationPath,
@@ -37,6 +47,29 @@ const statusClass = (status) =>
   ({ TITOLARE: "good", BALLOTTAGGIO: "caution", RISERVA: "muted" })[status] ||
   "muted";
 
+const fetchDefaultProfile = (apiBase) =>
+  fetch(apiUrl("/api/default-profile", apiBase))
+    .then((response) => (response.ok ? response.json() : null))
+    .catch(() => null);
+
+const PROFILE_STORAGE_KEY = "fanta-profile-id";
+// localStorage is unavailable in private windows and when site data is blocked.
+const readStoredProfileId = () => {
+  try {
+    return localStorage.getItem(PROFILE_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+};
+const writeStoredProfileId = (id) => {
+  try {
+    if (id) localStorage.setItem(PROFILE_STORAGE_KEY, id);
+    else localStorage.removeItem(PROFILE_STORAGE_KEY);
+  } catch {
+    /* ignore: the picker still works for this session */
+  }
+};
+
 const RECOMMENDATION_LABELS = {
   STRONG_BUY: "Compra",
   BID: "Conviene",
@@ -50,12 +83,17 @@ function App() {
   const [season, setSeason] = useState(null);
   const [profile, setProfile] = useState(null);
   const [profileError, setProfileError] = useState("");
+  const [profiles, setProfiles] = useState([]);
+  // Lives in App, not in Auction: leaving the view unmounts Auction and would
+  // otherwise throw away the player being nominated.
+  const [auctionDraft, setAuctionDraft] = useState(emptyDraft());
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationStatus, setGenerationStatus] = useState("");
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulationStatus, setSimulationStatus] = useState("");
+  // ?? not ||: an empty base is a valid choice (same-origin behind a proxy).
   const apiBase =
-    import.meta.env.VITE_LOCAL_API_BASE || "http://127.0.0.1:8000";
+    import.meta.env.VITE_LOCAL_API_BASE ?? "http://127.0.0.1:8000";
   const [view, setView] = useState("overview");
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   const [selectedTeam, setSelectedTeam] = useState(null);
@@ -63,25 +101,70 @@ function App() {
     { view: "overview", player: null, team: null },
   ]);
   const [historyIndex, setHistoryIndex] = useState(0);
+  const profileRequests = useRef(null);
+  if (!profileRequests.current) profileRequests.current = createRequestGate();
+  const claimProfileRequest = () => profileRequests.current.claim();
+  const isCurrentProfileRequest = (request) =>
+    profileRequests.current.isCurrent(request);
+  const latestProfileRequest = () => profileRequests.current.latest();
   useEffect(() => {
-    fetch(apiUrl("/api/default-profile", apiBase))
-      .then((response) => (response.ok ? response.json() : null))
-      .then(setProfile)
-      .catch(() => setProfile(null));
+    let cancelled = false;
+    const request = claimProfileRequest();
+    (async () => {
+      let names = [];
+      try {
+        names = await listProfiles({ apiBase });
+      } catch {
+        names = [];
+      }
+      if (cancelled) return;
+      setProfiles(names);
+      const storedId = readStoredProfileId();
+      let next = null;
+      if (storedId && names.includes(storedId)) {
+        next = await loadProfile(storedId, { apiBase }).catch(() => null);
+      }
+      if (!next) next = await fetchDefaultProfile(apiBase);
+      if (!cancelled && isCurrentProfileRequest(request)) setProfile(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [apiBase]);
   useEffect(() => {
     if (!profile) return;
+    // Never let path building throw inside an effect: an uncaught throw here
+    // unmounts the whole tree and leaves a blank page.
+    const pathError = datasetPathError(profile);
+    if (pathError) {
+      setProfileError(pathError);
+      setData(null);
+      setSeason(null);
+      return;
+    }
+    let cancelled = false;
     const datasetPath = auctionDatasetPath(profile);
     loadDatasetUrl(apiUrl(`/api/datasets/${datasetPath}`, apiBase), { profile })
       .then((nextData) => {
+        if (cancelled) return;
         setData(nextData);
         setSelectedTeam((team) => team || nextData.teams[0]?.squadra || null);
       })
-      .catch(() => setData(null));
+      .catch(() => {
+        if (!cancelled) setData(null);
+      });
     fetch(apiUrl(`/api/datasets/${seasonSimulationPath(profile)}`, apiBase))
       .then((response) => (response.ok ? response.json() : null))
-      .then(setSeason)
-      .catch(() => setSeason(null));
+      .then((nextSeason) => {
+        if (!cancelled) setSeason(nextSeason);
+      })
+      .catch(() => {
+        if (!cancelled) setSeason(null);
+      });
+    setAuctionDraft(emptyDraft());
+    return () => {
+      cancelled = true;
+    };
   }, [apiBase, profile]);
   useEffect(() => {
     const initialRoute = { view: "overview", player: null, team: null };
@@ -127,40 +210,224 @@ function App() {
     profile?.profile_id || data?.meta?.profile?.profile_id || "default";
   const updateProfile = async (nextProfile, generate = false) => {
     setProfileError("");
+    const pathError = datasetPathError(nextProfile);
+    if (pathError) {
+      setProfileError(pathError);
+      throw new Error(pathError);
+    }
+    const request = claimProfileRequest();
+    let saveWarning = "";
+    // The PUT response is the profile as the API validated it, so state and
+    // generation both use the stored version rather than the local edit.
+    let savedProfile = null;
     try {
-      const savedProfile = await saveProfile(nextProfile, { apiBase });
-      if (!generate) {
-       setProfile(payload.profile || savedProfile);
-        return;
+      const stored = await saveProfile(nextProfile, { apiBase });
+      savedProfile = stored?.profile_id ? stored : nextProfile;
+      setProfiles((current) =>
+        current.includes(savedProfile.profile_id)
+          ? current
+          : [...current, savedProfile.profile_id].sort(),
+      );
+    } catch (error) {
+      saveWarning = `Profilo non salvato su disco: ${
+        error instanceof Error ? error.message : "errore sconosciuto"
+      }.`;
+    }
+    const activeProfile = savedProfile || nextProfile;
+    if (!isCurrentProfileRequest(request)) return;
+    if (savedProfile) writeStoredProfileId(activeProfile.profile_id);
+    setProfile(activeProfile);
+    if (!generate) {
+      if (saveWarning) {
+        setProfileError(saveWarning);
+        throw new Error(saveWarning);
       }
-      const response = await fetch(`${apiBase}/api/generate`, {
+      return;
+    }
+    try {
+      const response = await fetch(apiUrl("/api/generate", apiBase), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile: savedProfile }),
+        body: JSON.stringify({ profile: activeProfile }),
       });
       const payload = await response.json();
       if (!response.ok || !payload.dataset_path)
         throw new Error(
           payload.error?.message || "Generazione non completata.",
         );
-      setData(
-        await loadDatasetUrl(
-          apiUrl(`/api/datasets/${payload.dataset_path}`, apiBase),
-          { profile: savedProfile },
-        ),
+      const nextData = await loadDatasetUrl(
+        apiUrl(`/api/datasets/${payload.dataset_path}`, apiBase),
+        { profile: activeProfile },
       );
-      setProfile(savedProfile);
+      if (!isCurrentProfileRequest(request)) return;
+      setData(nextData);
       setSeason(null);
       navigate("overview");
+      if (saveWarning) setProfileError(saveWarning);
+    } catch (error) {
+      if (isCurrentProfileRequest(request))
+        setProfileError(
+          error instanceof Error
+            ? error.message
+            : "Impossibile generare il dataset del profilo.",
+        );
+      throw error;
+    }
+  };
+  const selectProfile = async (id) => {
+    setProfileError("");
+    const request = claimProfileRequest();
+    if (!id) {
+      const fallback = await fetchDefaultProfile(apiBase);
+      if (!isCurrentProfileRequest(request)) return;
+      writeStoredProfileId("");
+      setProfile(fallback);
+      return;
+    }
+    try {
+      const next = await loadProfile(id, { apiBase });
+      if (!isCurrentProfileRequest(request)) return;
+      writeStoredProfileId(id);
+      setProfile(next);
+    } catch (error) {
+      if (!isCurrentProfileRequest(request)) return;
+      setProfileError(
+        error instanceof Error
+          ? error.message
+          : "Impossibile caricare il profilo salvato.",
+      );
+    }
+  };
+  const removeProfile = async (id) => {
+    if (!id) return;
+    if (
+      !window.confirm(
+        `Rimuovere il profilo "${id}"? I dati gia generati restano su disco.`,
+      )
+    )
+      return;
+    setProfileError("");
+    try {
+      await deleteProfile(id, { apiBase });
     } catch (error) {
       setProfileError(
         error instanceof Error
           ? error.message
-          : "Impossibile generare il dataset del profilo.",
+          : "Impossibile rimuovere il profilo.",
       );
-      throw error;
+      return;
+    }
+    setProfiles((current) => current.filter((name) => name !== id));
+    if (readStoredProfileId() === id) writeStoredProfileId("");
+    if (profile?.profile_id === id) {
+      const request = claimProfileRequest();
+      const fallback = await fetchDefaultProfile(apiBase);
+      if (isCurrentProfileRequest(request)) setProfile(fallback);
     }
   };
+  const exportProfile = () => {
+    if (!profile) return;
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(profile, null, 2)], {
+        type: "application/json",
+      }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${profile.profile_id || "profilo"}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+  const importProfile = async (file) => {
+    if (!file) return;
+    setProfileError("");
+    let incoming;
+    try {
+      incoming = parseProfileJson(await file.text());
+    } catch (error) {
+      setProfileError(
+        error instanceof Error ? error.message : "File del profilo non valido.",
+      );
+      return;
+    }
+    if (
+      profiles.includes(incoming.profile_id) &&
+      !window.confirm(
+        `Esiste gia un profilo "${incoming.profile_id}". Sovrascriverlo?`,
+      )
+    )
+      return;
+    const request = claimProfileRequest();
+    try {
+      const stored = await saveProfile(incoming, { apiBase });
+      const id = stored?.profile_id || incoming.profile_id;
+      setProfiles((current) =>
+        current.includes(id) ? current : [...current, id].sort(),
+      );
+      if (!isCurrentProfileRequest(request)) return;
+      writeStoredProfileId(id);
+      setProfile(stored || incoming);
+      setAuctionDraft(emptyDraft());
+    } catch (error) {
+      if (!isCurrentProfileRequest(request)) return;
+      setProfileError(
+        error instanceof Error
+          ? error.message
+          : "Impossibile importare il profilo.",
+      );
+    }
+  };
+  const profilePicker = (
+    <div className="profile-picker">
+      <label htmlFor="profile-select">Profilo</label>
+      <select
+        id="profile-select"
+        value={profiles.includes(profile?.profile_id) ? profile.profile_id : ""}
+        onChange={(event) => selectProfile(event.target.value)}
+      >
+        <option value="">Profilo predefinito</option>
+        {profiles.map((id) => (
+          <option key={id} value={id}>
+            {id}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="profile-icon"
+        onClick={exportProfile}
+        disabled={!profile}
+        title="Esporta"
+        aria-label="Esporta"
+      >
+        <Download size={16} aria-hidden="true" />
+      </button>
+      <label className="profile-icon profile-import" title="Importa">
+        <input
+          type="file"
+          accept=".json,application/json"
+          aria-label="Importa"
+          onChange={(event) => {
+            importProfile(event.target.files?.[0]);
+            event.target.value = "";
+          }}
+        />
+        <Upload size={16} aria-hidden="true" />
+      </label>
+      <button
+        type="button"
+        className="profile-icon danger"
+        onClick={() => removeProfile(profile?.profile_id)}
+        disabled={!profiles.includes(profile?.profile_id)}
+        title="Elimina"
+        aria-label="Elimina"
+      >
+        <Trash2 size={16} aria-hidden="true" />
+      </button>
+    </div>
+  );
   const regenerateData = async () => {
     if (!profile || isGenerating) return;
     setIsGenerating(true);
@@ -176,20 +443,28 @@ function App() {
   };
   const rerunSimulation = async () => {
     if (isSimulating) return;
+    const request = latestProfileRequest();
     setIsSimulating(true);
     setSimulationStatus("Simulazione in corso...");
     try {
-      const response = await fetch(`${apiBase}/api/simulate`, {
+      const response = await fetch(apiUrl("/api/simulate", apiBase), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profile, iterations: 1000, seed: 202627 }),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error?.message || "Simulazione non completata.");
+      if (!response.ok)
+        throw new Error(result.error?.message || "Simulazione non completata.");
+      if (!isCurrentProfileRequest(request)) {
+        setSimulationStatus("");
+        return;
+      }
       setSeason(result);
       setSimulationStatus("Simulazione aggiornata.");
     } catch (error) {
-      setSimulationStatus("Simulazione non riuscita.");
+      setSimulationStatus(
+        isCurrentProfileRequest(request) ? "Simulazione non riuscita." : "",
+      );
     } finally {
       setIsSimulating(false);
     }
@@ -212,8 +487,12 @@ function App() {
           <div className="view-heading">
             <span className="eyebrow">CONFIGURAZIONE INIZIALE</span>
             <h1>Genera il tuo dataset</h1>
-            <p>Carica il calendario della tua lega nelle Impostazioni e genera i dati per iniziare.</p>
+            <p>
+              Carica il calendario della tua lega nelle Impostazioni e genera i
+              dati per iniziare.
+            </p>
           </div>
+          <div className="profile-picker-row">{profilePicker}</div>{" "}
           <LeagueSettings
             initialProfile={profile}
             leagueCalendar={null}
@@ -221,19 +500,16 @@ function App() {
             onSave={(nextProfile) => updateProfile(nextProfile)}
             onGenerate={(nextProfile) => updateProfile(nextProfile, true)}
           />
-          {profileError && <p className="profile-error" role="alert">{profileError}</p>}
+          {profileError && (
+            <p className="profile-error" role="alert">
+              {profileError}
+            </p>
+          )}
         </section>
       </main>
     );
-  const datasetProfileHash = data.meta?.profile?.profile_hash;
-  const datasetState = datasetProfileHash && datasetProfileHash !== profile.configuration_hash
-    ? "dataset da rigenerare"
-    : data.meta?.profile?.source_fingerprints?.some((source) => source.exists === false)
-      ? "fonti cambiate"
-      : "dataset corrente";
-  const simulationState = season?.meta?.dataset_input_hash && season.meta.dataset_input_hash === data.meta?.profile?.dataset_input_hash
-    ? "simulazione corrente"
-    : "simulazione da aggiornare";
+  const datasetState = datasetFreshness(profile, data);
+  const simulationState = simulationFreshness(data, season);
   return (
     <main className="app-shell">
       <header className="app-header">
@@ -273,12 +549,20 @@ function App() {
             </button>
           ))}
         </nav>
-        <div className={`data-status ${datasetState === "dataset corrente" ? "current" : "stale"}`}>
+        {profilePicker}
+        <div
+          className={`data-status ${
+            datasetState === "dataset corrente" ? "current" : "stale"
+          }`}
+        >
           <i />
           {datasetState}
           <br />
           <small>
-            {generationStatus || `${simulationState} · ${data.meta?.generato_il?.slice(0, 10) || "profilo locale"}`}
+            {generationStatus ||
+              `${simulationState} · ${
+                data.meta?.generato_il?.slice(0, 10) || "profilo locale"
+              }`}
           </small>
           <button
             className="regenerate-data"
@@ -316,15 +600,15 @@ function App() {
         <SetPiecesView data={data} openPlayer={openPlayer} />
       )}
       {view === "simulation" && (
-          <SeasonView
-            season={season}
-            data={data}
-            openPlayer={openPlayer}
-            rules={activeRules}
-            profileId={activeProfileId}
-            onRerun={rerunSimulation}
-            isSimulating={isSimulating}
-            simulationStatus={simulationStatus}
+        <SeasonView
+          season={season}
+          data={data}
+          openPlayer={openPlayer}
+          rules={activeRules}
+          profileId={activeProfileId}
+          onRerun={rerunSimulation}
+          isSimulating={isSimulating}
+          simulationStatus={simulationStatus}
         />
       )}
       {view === "auction" && (
@@ -333,6 +617,8 @@ function App() {
           openPlayer={openPlayer}
           rules={activeRules}
           profileId={activeProfileId}
+          draft={auctionDraft}
+          setDraft={setAuctionDraft}
         />
       )}
       {view === "settings" && (
@@ -355,7 +641,16 @@ function App() {
   );
 }
 
-function SeasonView({ season, data, openPlayer, rules, profileId, onRerun, isSimulating, simulationStatus }) {
+function SeasonView({
+  season,
+  data,
+  openPlayer,
+  rules,
+  profileId,
+  onRerun,
+  isSimulating,
+  simulationStatus,
+}) {
   const [mode, setMode] = useState("report");
   return (
     <>
@@ -382,13 +677,27 @@ function SeasonView({ season, data, openPlayer, rules, profileId, onRerun, isSim
       {mode === "auction" ? (
         <RandomAuctionView data={data} rules={rules} profileId={profileId} />
       ) : (
-        <SeasonReport season={season} data={data} openPlayer={openPlayer} onRerun={onRerun} isSimulating={isSimulating} simulationStatus={simulationStatus} />
+        <SeasonReport
+          season={season}
+          data={data}
+          openPlayer={openPlayer}
+          onRerun={onRerun}
+          isSimulating={isSimulating}
+          simulationStatus={simulationStatus}
+        />
       )}
     </>
   );
 }
 
-function SeasonReport({ season, data, openPlayer, onRerun, isSimulating, simulationStatus }) {
+function SeasonReport({
+  season,
+  data,
+  openPlayer,
+  onRerun,
+  isSimulating,
+  simulationStatus,
+}) {
   const [selected, setSelected] = useState(null);
   if (!data.calendario_lega)
     return (
@@ -396,7 +705,10 @@ function SeasonReport({ season, data, openPlayer, onRerun, isSimulating, simulat
         <div className="view-heading">
           <span className="eyebrow">MONTE CARLO OFFLINE</span>
           <h1>Calendario della lega richiesto</h1>
-          <p>Puoi usare dashboard, proiezioni e asta. Carica il calendario della lega nelle Impostazioni per simulare la stagione.</p>
+          <p>
+            Puoi usare dashboard, proiezioni e asta. Carica il calendario della
+            lega nelle Impostazioni per simulare la stagione.
+          </p>
         </div>
       </section>
     );
@@ -406,8 +718,15 @@ function SeasonReport({ season, data, openPlayer, onRerun, isSimulating, simulat
         <div className="view-heading">
           <span className="eyebrow">MONTE CARLO OFFLINE</span>
           <h1>Simulazione non generata</h1>
-          <p>Avvia una simulazione per costruire il report pre-asta sulle rose esempio.</p>
-          <SimulationRunButton onRerun={onRerun} isSimulating={isSimulating} status={simulationStatus} />
+          <p>
+            Avvia una simulazione per costruire il report pre-asta sulle rose
+            esempio.
+          </p>
+          <SimulationRunButton
+            onRerun={onRerun}
+            isSimulating={isSimulating}
+            status={simulationStatus}
+          />
         </div>
       </section>
     );
@@ -429,9 +748,14 @@ function SeasonReport({ season, data, openPlayer, onRerun, isSimulating, simulat
         <h1>Esiti delle rose esempio</h1>
         <p>
           {season.iterations.toLocaleString("it-IT")} stagioni simulate · seed{" "}
-          {season.diagnostics.seed} · {data.calendario_lega?.matchdays?.length || "n/d"} giornate di lega
+          {season.diagnostics.seed} ·{" "}
+          {data.calendario_lega?.matchdays?.length || "n/d"} giornate di lega
         </p>
-        <SimulationRunButton onRerun={onRerun} isSimulating={isSimulating} status={simulationStatus} />
+        <SimulationRunButton
+          onRerun={onRerun}
+          isSimulating={isSimulating}
+          status={simulationStatus}
+        />
       </div>
       <section className="panel simulation-report">
         <div className="sim-header">
@@ -572,7 +896,11 @@ function Overview({ data, openPlayer, openTeam }) {
             {data.players.length}
             <small> giocatori</small>
           </strong>
-          <p>{data.teams.length} squadre Serie A · {data.calendario_serie_a?.length / 10 || "n/d"} giornate · {data.set_pieces.length} gerarchie piazzati</p>
+          <p>
+            {data.teams.length} squadre Serie A ·{" "}
+            {data.calendario_serie_a?.length / 10 || "n/d"} giornate ·{" "}
+            {data.set_pieces.length} gerarchie piazzati
+          </p>
         </div>
       </section>
       <section className="metric-grid">
@@ -656,7 +984,9 @@ function Overview({ data, openPlayer, openTeam }) {
             <span className="eyebrow">SERIE A</span>
             <h2>Esplora le squadre</h2>
           </div>
-          <button onClick={() => openTeam(data.teams[0]?.squadra)}>Calendari e rose</button>
+          <button onClick={() => openTeam(data.teams[0]?.squadra)}>
+            Calendari e rose
+          </button>
         </div>
         <div>
           {data.teams.map((team) => (
@@ -743,9 +1073,7 @@ function PlayersView({ data, rules, selected, setSelected }) {
             </button>
           ))}
         </div>
-        {player && (
-          <PlayerDetail player={player} valuation={valuation} />
-        )}
+        {player && <PlayerDetail player={player} valuation={valuation} />}
       </div>
     </section>
   );
@@ -1152,7 +1480,7 @@ function AuctionOverview({ overview }) {
   );
 }
 
-function Auction({ data, openPlayer, rules, profileId }) {
+function Auction({ data, openPlayer, rules, profileId, draft, setDraft }) {
   const activeRules = normalizeRules(
     rules ?? data.league_rules ?? { startingCredits: 750 },
   );
@@ -1189,10 +1517,20 @@ function Auction({ data, openPlayer, rules, profileId }) {
     return loadAuction();
   });
   const [userTeamIndex, setUserTeamIndex] = useState(defaultUserTeamIndex);
-  const [query, setQuery] = useState("");
-  const [player, setPlayer] = useState(null);
+  const { query, price } = draft;
+  const setQuery = (value) =>
+    setDraft((current) => ({ ...current, query: value }));
+  const setPrice = (value) =>
+    setDraft((current) => ({ ...current, price: value }));
+  // The draft stores an id, so a regenerated dataset can never leave a stale
+  // player object selected.
+  const player = draftPlayer(draft, data.players);
+  const setPlayer = (candidate) =>
+    setDraft((current) => ({
+      ...current,
+      playerId: candidate ? candidate.id : null,
+    }));
   const [owner, setOwner] = useState(userTeamIndex);
-  const [price, setPrice] = useState("");
   const [advice, setAdvice] = useState(null);
   const [overviewAdvice, setOverviewAdvice] = useState(null);
   const [message, setMessage] = useState(
@@ -1211,14 +1549,21 @@ function Auction({ data, openPlayer, rules, profileId }) {
       ? [{ ...transaction, player: transactionPlayer }]
       : [];
   });
+  const resetSignature = `${storageKey}|${rulesSignature}|${defaultUserTeamIndex}`;
+  const lastResetSignature = useRef(resetSignature);
   useEffect(() => {
     skipPersist.current = true;
     setState(loadAuction());
     setUserTeamIndex(defaultUserTeamIndex);
     setOwner(defaultUserTeamIndex);
-    setPlayer(null);
-    setQuery("");
-    setPrice("");
+    // This effect also runs on every remount, so clear the nomination only when
+    // the profile or the rules actually changed - not when returning to the view.
+    if (lastResetSignature.current !== resetSignature) {
+      setPlayer(null);
+      setQuery("");
+      setPrice("");
+    }
+    lastResetSignature.current = resetSignature;
   }, [storageKey, rulesSignature, defaultUserTeamIndex]);
   useEffect(() => {
     if (skipPersist.current) {
@@ -1275,7 +1620,9 @@ function Auction({ data, openPlayer, rules, profileId }) {
     .slice(0, 7);
   const selectPlayer = (candidate) => {
     if (activeRole && candidate.ruolo !== activeRole) {
-      setMessage(`In questa fase puoi chiamare solo ${ROLE_LABELS[activeRole].toLowerCase()}.`);
+      setMessage(
+        `In questa fase puoi chiamare solo ${ROLE_LABELS[activeRole].toLowerCase()}.`,
+      );
       return setMessageType("error");
     }
     setPlayer(candidate);
@@ -1294,7 +1641,9 @@ function Auction({ data, openPlayer, rules, profileId }) {
       return setMessageType("error");
     }
     if (activeRole && player.ruolo !== activeRole) {
-      setMessage(`In questa fase puoi assegnare solo ${ROLE_LABELS[activeRole].toLowerCase()}.`);
+      setMessage(
+        `In questa fase puoi assegnare solo ${ROLE_LABELS[activeRole].toLowerCase()}.`,
+      );
       return setMessageType("error");
     }
     if (!Number.isInteger(value) || value < activeRules.auction.minPrice) {
@@ -1522,7 +1871,8 @@ function Auction({ data, openPlayer, rules, profileId }) {
       </p>
       {activeRole && (
         <p className="auction-status info" role="status">
-          Fase attiva: {ROLE_LABELS[activeRole]}. Completa i posti di questo ruolo in tutte le rose per passare al successivo.
+          Fase attiva: {ROLE_LABELS[activeRole]}. Completa i posti di questo
+          ruolo in tutte le rose per passare al successivo.
         </p>
       )}
       <div className="auction-bar">
@@ -1539,7 +1889,8 @@ function Auction({ data, openPlayer, rules, profileId }) {
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
-              if (player && activeRole && player.ruolo !== activeRole) setPlayer(null);
+              if (player && activeRole && player.ruolo !== activeRole)
+                setPlayer(null);
               setSuggestionsOpen(true);
             }}
             onFocus={() => setSuggestionsOpen(true)}
@@ -1706,8 +2057,27 @@ function Auction({ data, openPlayer, rules, profileId }) {
   );
 }
 
+class AppErrorBoundary extends Component {
+  state = { error: null };
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <section className="app-crash">
+        <h1>Qualcosa è andato storto</h1>
+        <p>{this.state.error.message || "Errore inatteso."}</p>
+        <button onClick={() => window.location.reload()}>Ricarica l'app</button>
+      </section>
+    );
+  }
+}
+
 createRoot(document.getElementById("root")).render(
   <StrictMode>
-    <App />
+    <AppErrorBoundary>
+      <App />
+    </AppErrorBoundary>
   </StrictMode>,
 );
