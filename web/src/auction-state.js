@@ -19,6 +19,33 @@ export const draftPlayer = (draft, players) => {
   );
 };
 
+export const draftForQuery = (draft, players, query) => {
+  const selected = draftPlayer(draft, players);
+  return selected && query !== selected.nome
+    ? { ...draft, playerId: null, query, price: "" }
+    : { ...draft, query };
+};
+
+export const auctionPriceAtOrBelow = (value, rules) => {
+  const minimum = rules.auction.minPrice;
+  const increment = rules.auction.increment;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < minimum) return null;
+  return minimum + Math.floor((numeric - minimum) / increment) * increment;
+};
+
+export const nearestAuctionPrice = (value, maximum, rules) => {
+  const minimum = rules.auction.minPrice;
+  const increment = rules.auction.increment;
+  const ceiling = auctionPriceAtOrBelow(maximum, rules);
+  if (ceiling == null) return null;
+  const numeric = Number(value);
+  const target = Number.isFinite(numeric) ? numeric : minimum;
+  const snapped =
+    minimum + Math.round((Math.max(minimum, target) - minimum) / increment) * increment;
+  return Math.min(snapped, ceiling);
+};
+
 export const auctionStorageKey = (profileId) =>
   `fanta-auction-v${AUCTION_STORAGE_VERSION}:${encodeURIComponent(profileId || "default")}`;
 
@@ -55,7 +82,11 @@ export const legalMaxBid = (team, rules) => {
     (sum, count) => sum + Math.max(0, count),
     0,
   );
-  return Math.max(0, team.credits - Math.max(0, openSlots - 1) * rules.auction.reserve);
+  const raw = Math.max(
+    0,
+    team.credits - Math.max(0, openSlots - 1) * rules.auction.reserve,
+  );
+  return auctionPriceAtOrBelow(raw, rules) ?? 0;
 };
 
 export const isValidBid = (price, team, rules) => {
