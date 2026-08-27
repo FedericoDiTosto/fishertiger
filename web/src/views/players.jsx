@@ -50,6 +50,10 @@ export default function PlayersView({
     if (initialRole) setRole(initialRole);
   }, [initialRole]);
 
+  useEffect(() => {
+    if (selected && !isDesktop) setSheetOpen(true);
+  }, [selected, isDesktop]);
+
   const valuation = useMemo(
     () => createRoleValuation(data.players, rules),
     [data.players, rules],

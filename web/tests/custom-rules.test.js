@@ -70,3 +70,28 @@ test("worker plans custom roles and preserves the configured two-credit reserve"
   assert.equal(evaluateAuction(data).legalMax, 10);
   assert.deepEqual(Object.keys(evaluateOverview(data).rolePlan).sort(), ["A", "C", "D", "P"]);
 });
+
+test("worker advice respects a custom minimum plus increment grid", () => {
+  const customRules = {
+    ...rules,
+    auction: { ...rules.auction, minPrice: 2, increment: 3 },
+  };
+  const teams = [{ name: "Arco", credits: 31, roster: [] }];
+  const advice = evaluateAuction({
+    rules: customRules,
+    teams,
+    mine: teams[0],
+    owner: 0,
+    player: players.find((player) => player.ruolo === "P"),
+    remaining: players,
+    assigned: {},
+  });
+  for (const price of [
+    advice.idealMin,
+    advice.idealMax,
+    advice.maxBid,
+    advice.legalMax,
+    advice.summary.estimatedMarketPrice,
+  ].filter((price) => price > 0))
+    assert.equal((price - 2) % 3, 0);
+});

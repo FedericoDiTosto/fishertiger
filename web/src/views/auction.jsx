@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { activeNominationRole } from "../auction-nomination.js";
 import {
   auctionStorageKey,
+  draftForQuery,
   draftPlayer,
   emptyAuction,
   isValidBid,
   legalMaxBid,
+  nearestAuctionPrice,
   playerIdKey,
   rehydrateAuction,
   serializeAuction,
@@ -226,8 +228,9 @@ export default function AuctionView({
     const estimate = Number(advice.summary?.estimatedMarketPrice);
     if (!Number.isFinite(estimate) || estimate < activeRules.auction.minPrice)
       return;
-    setPrice(String(Math.min(estimate, selectedLegalMax || estimate)));
-  }, [player, advice]);
+    const suggested = nearestAuctionPrice(estimate, selectedLegalMax, activeRules);
+    if (suggested != null) setPrice(String(suggested));
+  }, [player, advice, selectedLegalMax, rulesSignature]);
 
   const say = (text, tone = "info") => setMessage({ text, tone });
 
@@ -255,14 +258,20 @@ export default function AuctionView({
     setMessage(null);
   };
 
-  const bumpPrice = (delta) => {
+  const bumpPrice = (steps) => {
     priceTouched.current = true;
-    const current = Number(price) || activeRules.auction.minPrice;
-    const next = Math.max(
-      activeRules.auction.minPrice,
-      Math.min(selectedLegalMax || current + delta, current + delta),
+    const current = nearestAuctionPrice(
+      price,
+      selectedLegalMax,
+      activeRules,
     );
-    setPrice(String(next));
+    if (current == null) return;
+    const next = nearestAuctionPrice(
+      current + steps * activeRules.auction.increment,
+      selectedLegalMax,
+      activeRules,
+    );
+    if (next != null) setPrice(String(next));
   };
 
   const assign = () => {
@@ -484,9 +493,14 @@ export default function AuctionView({
                 className="input"
                 value={query}
                 onChange={(event) => {
-                  setQuery(event.target.value);
-                  if (player && activeRole && player.ruolo !== activeRole)
-                    setPlayer(null);
+                  const nextQuery = event.target.value;
+                  if (player && nextQuery !== player.nome) {
+                    setAdvice(null);
+                    priceTouched.current = false;
+                  }
+                  setDraft((current) =>
+                    draftForQuery(current, data.players, nextQuery),
+                  );
                   setSuggestionsOpen(true);
                 }}
                 onFocus={() => setSuggestionsOpen(true)}
@@ -869,9 +883,9 @@ function VerdictCard({
               key={step}
               type="button"
               onClick={() => onStep(step)}
-              aria-label={`Riduci di ${Math.abs(step)}`}
+              aria-label={`Riduci di ${Math.abs(step * rules.auction.increment)}`}
             >
-              {step}
+              {step * rules.auction.increment}
             </button>
           ))}
           <input
@@ -892,9 +906,9 @@ function VerdictCard({
               key={step}
               type="button"
               onClick={() => onStep(step)}
-              aria-label={`Aumenta di ${step}`}
+              aria-label={`Aumenta di ${step * rules.auction.increment}`}
             >
-              +{step}
+              +{step * rules.auction.increment}
             </button>
           ))}
         </div>

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { draftPlayer, emptyAuction, emptyDraft, legalMaxBid, rehydrateAuction, serializeAuction } from "../src/auction-state.js";
+import { auctionPriceAtOrBelow, draftForQuery, draftPlayer, emptyAuction, emptyDraft, legalMaxBid, nearestAuctionPrice, rehydrateAuction, serializeAuction } from "../src/auction-state.js";
 
 const rules = { participants: 2, teamNames: ["Mine", "Other"], startingCredits: 20, rosterSlots: { P: 1, A: 1 }, auction: { minPrice: 2, increment: 2, reserve: 2 } };
 const players = [{ id: 1, ruolo: "P" }, { id: 2, ruolo: "A" }];
@@ -40,4 +40,30 @@ test("a nomination draft for a player the dataset no longer has selects nobody",
   assert.equal(draftPlayer({ ...emptyDraft(), playerId: 99 }, players), null);
   assert.equal(draftPlayer({ ...emptyDraft(), playerId: 1 }, []), null);
   assert.equal(draftPlayer(null, players), null);
+});
+
+test("editing a selected player's query invalidates the nomination and price", () => {
+  const selected = { playerId: 2, query: "Player A", price: "11" };
+  assert.deepEqual(draftForQuery(selected, [{ id: 2, nome: "Player A" }], "Player B"), {
+    playerId: null,
+    query: "Player B",
+    price: "",
+  });
+  assert.deepEqual(draftForQuery(selected, [{ id: 2, nome: "Player A" }], "Player A"), selected);
+});
+
+test("custom minimum and increment snap every generated price to the legal grid", () => {
+  const custom = {
+    ...rules,
+    auction: { minPrice: 2, increment: 3, reserve: 2 },
+  };
+  const team = { ...emptyAuction(custom).teams[0], credits: 20 };
+  assert.equal(auctionPriceAtOrBelow(20, custom), 20);
+  assert.equal(auctionPriceAtOrBelow(19, custom), 17);
+  assert.equal(nearestAuctionPrice(12, 19, custom), 11);
+  assert.equal(nearestAuctionPrice(13, 19, custom), 14);
+  assert.equal(nearestAuctionPrice(99, 19, custom), 17);
+  assert.equal(legalMaxBid(team, custom), 17);
+  for (const price of [2, 5, 8, 11, 14, 17])
+    assert.equal((price - custom.auction.minPrice) % custom.auction.increment, 0);
 });

@@ -5,6 +5,7 @@ import {
   sourceFvm,
 } from "./player-valuation.js";
 import { expectedDefenseModifier } from "./defense-modifier.js";
+import { auctionPriceAtOrBelow } from "./auction-state.js";
 const EMPTY = -1e15;
 
 const finite = (value, fallback = 0) =>
@@ -457,7 +458,14 @@ export const evaluateAuction = (data = {}) => {
   const needs = roleNeeds(team, rules);
   const openSlots = totalNeeds(needs);
   const credits = Math.max(0, Math.floor(finite(team.credits)));
-  const legalMax = Math.max(0, credits - Math.max(0, openSlots - 1) * rules.auction.reserve);
+  const legalMax =
+    auctionPriceAtOrBelow(
+      Math.max(
+        0,
+        credits - Math.max(0, openSlots - 1) * rules.auction.reserve,
+      ),
+      rules,
+    ) ?? 0;
 
   if (!player || !roles.includes(player.ruolo)) {
     return invalidResult(
@@ -567,15 +575,22 @@ export const evaluateAuction = (data = {}) => {
     if (withCandidate[credits - bid] > EMPTY / 2) maxBid = bid;
   }
 
-  const idealMax = Math.min(maxBid, Math.max(0, rounded(candidateCost * 1.05)));
+  const idealMax =
+    auctionPriceAtOrBelow(
+      Math.min(maxBid, Math.max(0, rounded(candidateCost * 1.05))),
+      rules,
+    ) ?? 0;
   const idealMin =
     idealMax > 0
-      ? Math.max(
-          rules.auction.minPrice,
-          Math.min(
-            rounded(candidateCost * 0.75),
-            rounded(idealMax * 0.8),
+      ? auctionPriceAtOrBelow(
+          Math.max(
+            rules.auction.minPrice,
+            Math.min(
+              rounded(candidateCost * 0.75),
+              rounded(idealMax * 0.8),
+            ),
           ),
+          rules,
         )
       : 0;
   const recommendation =
@@ -714,7 +729,11 @@ export const evaluateAuction = (data = {}) => {
         withCandidate[credits - maxBid] > EMPTY / 2
           ? rounded(candidateValue + withCandidate[credits - maxBid])
           : null,
-      estimatedMarketPrice: candidateCost,
+      estimatedMarketPrice:
+        auctionPriceAtOrBelow(
+          Math.max(candidateCost, rules.auction.minPrice),
+          rules,
+        ) ?? rules.auction.minPrice,
       marketInflation: Number(market.inflation.toFixed(3)),
       roleInflation: Number(market.roleInflation[player.ruolo].toFixed(3)),
       roleScarcity: Number(scarcityInfo.ratio.toFixed(3)),
