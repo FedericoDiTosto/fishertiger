@@ -205,7 +205,7 @@ function validate(profile) {
   required(profile.profile_id, "ID profilo");
   if (String(profile.profile_id ?? "").trim() && !isValidProfileId(profile.profile_id))
     errors.push(
-      "L'ID profilo può contenere solo lettere, numeri, underscore e trattini.",
+      "L'ID profilo deve iniziare con una lettera o un numero e contenere al massimo 64 caratteri tra lettere, numeri, underscore e trattini.",
     );
   required(profile.name, "Nome del profilo");
   required(profile.season.season, "Stagione");
@@ -387,6 +387,9 @@ export function LeagueSettings({
   const [sourceStatuses, setSourceStatuses] = useState({});
   const changePolicy = profileChangePolicy(mergeProfile(initialProfile, leagueCalendar), profile);
   const errorRef = useRef(null);
+  const saveRequest = useRef(0);
+  const submittedProfileId = useRef(null);
+  const syncedInitialProfile = useRef(initialProfile);
   const endpoint = (path) => `${apiBase.replace(/\/$/, "")}${path}`;
   const sourceSignature = JSON.stringify(
     ["current_sources", "history_sources"].flatMap((group) =>
@@ -400,6 +403,17 @@ export function LeagueSettings({
     ),
   );
   useEffect(() => {
+    const ownSave =
+      Boolean(submittedProfileId.current) &&
+      submittedProfileId.current === initialProfile?.profile_id;
+    const profileChanged = syncedInitialProfile.current !== initialProfile;
+    submittedProfileId.current = null;
+    syncedInitialProfile.current = initialProfile;
+    if (profileChanged && !ownSave) {
+      saveRequest.current += 1;
+      setBusy(false);
+      setStatus("");
+    }
     setProfile(mergeProfile(initialProfile, leagueCalendar));
   }, [initialProfile, leagueCalendar]);
   useEffect(() => {
@@ -548,12 +562,15 @@ export function LeagueSettings({
       requestAnimationFrame(() => errorRef.current?.focus());
       return;
     }
+    const request = ++saveRequest.current;
+    submittedProfileId.current = profile.profile_id;
     setBusy(true);
     setStatus("");
     try {
       const callback = generate ? onGenerate : onSave;
       if (callback) {
-        await callback(profile);
+        const committed = await callback(profile);
+        if (request !== saveRequest.current || committed === false) return;
         setStatus(
           generate
             ? "Dati rigenerati per questo profilo."
@@ -573,17 +590,21 @@ export function LeagueSettings({
       });
       if (!response.ok)
         throw new Error(`L'API locale ha restituito ${response.status}`);
+      if (request !== saveRequest.current) return;
       setStatus(
         generate
           ? "Generazione richiesta correttamente."
           : "Profilo salvato correttamente.",
       );
     } catch (error) {
-      setStatus(
-        `Impossibile ${generate ? "generare" : "salvare"}: ${error.message}.`,
-      );
+      if (request === saveRequest.current)
+        setStatus(
+          `Impossibile ${generate ? "generare" : "salvare"}: ${error.message}.`,
+        );
     } finally {
-      setBusy(false);
+      if (request === saveRequest.current) {
+        setBusy(false);
+      }
     }
   };
   const uploadSource = async (group, index, file) => {

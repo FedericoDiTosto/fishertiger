@@ -17,7 +17,7 @@ from rapidfuzz import fuzz
 from .config import LeagueConfig, ModelConfig
 from .league_calendar import preprocess_legacy_calendar, validate_calendar
 from .league_profile import LeagueProfile
-from .freshness import dataset_input_hash, source_fingerprints
+from .freshness import dataset_configuration_hash, dataset_input_hash, source_fingerprints
 
 RAW = Path("data/raw")
 PROCESSED = Path("data/processed")
@@ -494,7 +494,7 @@ def build_projections(raw: Path = RAW, output: Path = PROCESSED, config: ModelCo
             set_piece_records.append({"squadra": team_name, "team_id": normalize(team_name), "tipo": kind, "takers": sorted(takers, key=lambda item: item["priorita"])})
     league_rules = league_rules_payload(league)
     fingerprints = source_fingerprints(profile, raw) if profile else []
-    profile_meta = {"profile_id": profile.profile_id, "profile_name": profile.name, "profile_hash": profile.configuration_hash, "dataset_input_hash": dataset_input_hash(profile, fingerprints), "source_fingerprints": fingerprints, "season": profile.season.season} if profile else None
+    profile_meta = {"profile_id": profile.profile_id, "profile_name": profile.name, "profile_hash": profile.configuration_hash, "dataset_configuration_hash": dataset_configuration_hash(profile), "dataset_input_hash": dataset_input_hash(profile, fingerprints), "source_fingerprints": fingerprints, "season": profile.season.season} if profile else None
     current_matchdays = [day["serie_a_matchday"] for day in league_calendar["matchdays"]] if league_calendar else list(range(profile.season.fantasy_start_matchday, profile.season.fantasy_end_matchday + 1)) if profile else []
     horizons = {
         "historical": {"matchdays": config.season_days, "label": f"storico {config.season_days}"},

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from advisor.league_profile import LeagueProfile
-from advisor.server import create_server
+from advisor.server import create_server, profile_response
 
 
 PROJECT_ROOT = Path(__file__).parents[1]
@@ -65,7 +65,7 @@ def test_default_profile_posts_to_generator_and_serves_a_scoped_frontend_dataset
 
     status, saved = client.request("PUT", "/api/profiles/profile-flow", json.dumps(profile).encode())
     assert status == 200
-    assert saved == {**json.loads(expected_profile.canonical_json()), "configuration_hash": expected_profile.configuration_hash}
+    assert saved == json.loads(json.dumps(profile_response(expected_profile)))
 
     status, result = client.request("POST", "/api/generate", b'{"profile_id":"profile-flow"}')
     assert status == 200

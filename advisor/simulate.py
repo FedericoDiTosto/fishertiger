@@ -7,7 +7,7 @@ from pathlib import Path
 from .config import LeagueConfig
 from .league_profile import LeagueProfile
 from .simulation import make_sample_rosters, simulate_season
-from .freshness import SIMULATOR_VERSION, dataset_input_hash, simulation_input_hash, source_fingerprints
+from .freshness import SIMULATOR_VERSION, dataset_input_hash, simulation_configuration_hash, simulation_input_hash, source_fingerprints
 
 
 def run_simulation(output_dir: Path, *, iterations: int = 1000, seed: int = 202627, league: LeagueConfig | None = None, profile: LeagueProfile | None = None, raw_dir: Path = Path("data/raw")) -> dict:
@@ -24,7 +24,7 @@ def run_simulation(output_dir: Path, *, iterations: int = 1000, seed: int = 2026
             raise ValueError("Dataset inputs changed; regenerate the dataset before simulating")
     rosters = make_sample_rosters(payload, league)
     result = simulate_season(payload, rosters, iterations=iterations, seed=seed, league=league)
-    output = {"iterations": result.iterations, "teams": result.teams, "scenarios": result.scenarios, "diagnostics": result.diagnostics, "rosters": rosters, "meta": {"dataset_input_hash": expected_dataset_hash, "simulation_input_hash": simulation_input_hash(expected_dataset_hash or "", profile) if profile else None, "seed": seed, "iterations": iterations, "simulator_version": SIMULATOR_VERSION}}
+    output = {"iterations": result.iterations, "teams": result.teams, "scenarios": result.scenarios, "diagnostics": result.diagnostics, "rosters": rosters, "meta": {"dataset_input_hash": expected_dataset_hash, "simulation_configuration_hash": simulation_configuration_hash(profile) if profile else None, "simulation_input_hash": simulation_input_hash(expected_dataset_hash or "", profile) if profile else None, "seed": seed, "iterations": iterations, "simulator_version": SIMULATOR_VERSION}}
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "season_simulation.json").write_text(json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8")
     return output

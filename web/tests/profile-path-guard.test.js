@@ -10,6 +10,10 @@ const valid = { profile_id: "my-league", season: { season: "2026/27" } };
 
 test("accepts only path-safe profile IDs", () => {
   assert.equal(isValidProfileId("my-league_1"), true);
+  assert.equal(isValidProfileId("a".repeat(64)), true);
+  assert.equal(isValidProfileId("_my-league"), false);
+  assert.equal(isValidProfileId("-my-league"), false);
+  assert.equal(isValidProfileId("a".repeat(65)), false);
   assert.equal(isValidProfileId("mia lega"), false);
   assert.equal(isValidProfileId("lega/2026"), false);
   assert.equal(isValidProfileId(""), false);

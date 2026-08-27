@@ -36,11 +36,39 @@ def source_fingerprints(profile: Any, raw: Path) -> list[dict[str, Any]]:
     return result
 
 
+def dataset_configuration_hash(profile: Any) -> str:
+    payload = {
+        "season": profile.season,
+        "current_sources": profile.current_sources,
+        "history_sources": profile.history_sources,
+        "scoring": profile.scoring,
+        "participants": profile.participants,
+    }
+    return hashlib.sha256(_canonical(payload)).hexdigest()
+
+
 def dataset_input_hash(profile: Any, fingerprints: list[dict[str, Any]]) -> str:
-    payload = {"season": profile.season, "current_sources": profile.current_sources, "history_sources": profile.history_sources, "scoring": profile.scoring, "participants": profile.participants, "sources": fingerprints}
+    # mtimes are useful diagnostics, but content-identical files are equivalent
+    # inputs and must not force a regeneration merely because they were touched.
+    stable_fingerprints = [
+        {key: value for key, value in fingerprint.items() if key != "modified_at"}
+        for fingerprint in fingerprints
+    ]
+    payload = {
+        "configuration_hash": dataset_configuration_hash(profile),
+        "sources": stable_fingerprints,
+    }
+    return hashlib.sha256(_canonical(payload)).hexdigest()
+
+
+def simulation_configuration_hash(profile: Any) -> str:
+    payload = {"simulation_version": SIMULATOR_VERSION, "defense_modifier": profile.defense_modifier, "formations": profile.formations, "bench_switch": profile.bench_switch, "virtual_goals": profile.virtual_goals, "standings": profile.standings, "payouts": profile.payouts, "entry_fee_eur": profile.credits.entry_fee_eur, "incomplete_lineup": profile.incomplete_lineup, "roster_slots": profile.roster_slots}
     return hashlib.sha256(_canonical(payload)).hexdigest()
 
 
 def simulation_input_hash(dataset_hash: str, profile: Any) -> str:
-    payload = {"dataset_input_hash": dataset_hash, "simulation_version": SIMULATOR_VERSION, "defense_modifier": profile.defense_modifier, "formations": profile.formations, "bench_switch": profile.bench_switch, "virtual_goals": profile.virtual_goals, "standings": profile.standings, "payouts": profile.payouts, "entry_fee_eur": profile.credits.entry_fee_eur, "incomplete_lineup": profile.incomplete_lineup, "roster_slots": profile.roster_slots}
+    payload = {
+        "dataset_input_hash": dataset_hash,
+        "configuration_hash": simulation_configuration_hash(profile),
+    }
     return hashlib.sha256(_canonical(payload)).hexdigest()

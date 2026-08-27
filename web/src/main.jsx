@@ -102,11 +102,32 @@ function App() {
   ]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const profileRequests = useRef(null);
+  const generationRequests = useRef(null);
+  const simulationRequests = useRef(null);
+  const generatedProfileCommit = useRef(null);
   if (!profileRequests.current) profileRequests.current = createRequestGate();
+  if (!generationRequests.current)
+    generationRequests.current = createRequestGate();
+  if (!simulationRequests.current)
+    simulationRequests.current = createRequestGate();
   const claimProfileRequest = () => profileRequests.current.claim();
   const isCurrentProfileRequest = (request) =>
     profileRequests.current.isCurrent(request);
   const latestProfileRequest = () => profileRequests.current.latest();
+  const invalidateGeneration = () => {
+    generationRequests.current.claim();
+    setIsGenerating(false);
+    setGenerationStatus("");
+  };
+  const invalidateSimulation = () => {
+    simulationRequests.current.claim();
+    setIsSimulating(false);
+    setSimulationStatus("");
+  };
+  const invalidateOperations = () => {
+    invalidateGeneration();
+    invalidateSimulation();
+  };
   useEffect(() => {
     let cancelled = false;
     const request = claimProfileRequest();
@@ -133,6 +154,11 @@ function App() {
   }, [apiBase]);
   useEffect(() => {
     if (!profile) return;
+    if (generatedProfileCommit.current === profile) {
+      generatedProfileCommit.current = null;
+      setAuctionDraft(emptyDraft());
+      return;
+    }
     // Never let path building throw inside an effect: an uncaught throw here
     // unmounts the whole tree and leaves a blank page.
     const pathError = datasetPathError(profile);
@@ -215,6 +241,15 @@ function App() {
       setProfileError(pathError);
       throw new Error(pathError);
     }
+    let generationRequest = null;
+    if (generate) {
+      generationRequest = generationRequests.current.claim();
+      setIsGenerating(true);
+      setGenerationStatus("Rigenerazione in corso...");
+      invalidateSimulation();
+    } else {
+      invalidateOperations();
+    }
     const request = claimProfileRequest();
     let saveWarning = "";
     // The PUT response is the profile as the API validated it, so state and
@@ -223,26 +258,27 @@ function App() {
     try {
       const stored = await saveProfile(nextProfile, { apiBase });
       savedProfile = stored?.profile_id ? stored : nextProfile;
-      setProfiles((current) =>
-        current.includes(savedProfile.profile_id)
-          ? current
-          : [...current, savedProfile.profile_id].sort(),
-      );
     } catch (error) {
       saveWarning = `Profilo non salvato su disco: ${
         error instanceof Error ? error.message : "errore sconosciuto"
       }.`;
     }
     const activeProfile = savedProfile || nextProfile;
-    if (!isCurrentProfileRequest(request)) return;
+    if (!isCurrentProfileRequest(request)) return false;
+    if (savedProfile)
+      setProfiles((current) =>
+        current.includes(savedProfile.profile_id)
+          ? current
+          : [...current, savedProfile.profile_id].sort(),
+      );
     if (savedProfile) writeStoredProfileId(activeProfile.profile_id);
-    setProfile(activeProfile);
     if (!generate) {
+      setProfile(activeProfile);
       if (saveWarning) {
         setProfileError(saveWarning);
         throw new Error(saveWarning);
       }
-      return;
+      return true;
     }
     try {
       const response = await fetch(apiUrl("/api/generate", apiBase), {
@@ -259,22 +295,43 @@ function App() {
         apiUrl(`/api/datasets/${payload.dataset_path}`, apiBase),
         { profile: activeProfile },
       );
-      if (!isCurrentProfileRequest(request)) return;
+      if (
+        !isCurrentProfileRequest(request) ||
+        !generationRequests.current.isCurrent(generationRequest)
+      )
+        return false;
+      const generatedProfile = { ...activeProfile };
+      generatedProfileCommit.current = generatedProfile;
+      setProfile(generatedProfile);
       setData(nextData);
+      setSelectedTeam((team) => team || nextData.teams[0]?.squadra || null);
       setSeason(null);
       navigate("overview");
       if (saveWarning) setProfileError(saveWarning);
+      setGenerationStatus("Dati rigenerati.");
+      return true;
     } catch (error) {
-      if (isCurrentProfileRequest(request))
+      const current =
+        isCurrentProfileRequest(request) &&
+        generationRequests.current.isCurrent(generationRequest);
+      if (current) {
+        setProfile(activeProfile);
         setProfileError(
           error instanceof Error
             ? error.message
             : "Impossibile generare il dataset del profilo.",
         );
+        setGenerationStatus("Rigenerazione non riuscita.");
+      }
+      if (!current) return false;
       throw error;
+    } finally {
+      if (generationRequests.current.isCurrent(generationRequest))
+        setIsGenerating(false);
     }
   };
   const selectProfile = async (id) => {
+    invalidateOperations();
     setProfileError("");
     const request = claimProfileRequest();
     if (!id) {
@@ -306,6 +363,7 @@ function App() {
       )
     )
       return;
+    invalidateOperations();
     setProfileError("");
     try {
       await deleteProfile(id, { apiBase });
@@ -359,14 +417,15 @@ function App() {
       )
     )
       return;
+    invalidateOperations();
     const request = claimProfileRequest();
     try {
       const stored = await saveProfile(incoming, { apiBase });
       const id = stored?.profile_id || incoming.profile_id;
+      if (!isCurrentProfileRequest(request)) return;
       setProfiles((current) =>
         current.includes(id) ? current : [...current, id].sort(),
       );
-      if (!isCurrentProfileRequest(request)) return;
       writeStoredProfileId(id);
       setProfile(stored || incoming);
       setAuctionDraft(emptyDraft());
@@ -430,20 +489,14 @@ function App() {
   );
   const regenerateData = async () => {
     if (!profile || isGenerating) return;
-    setIsGenerating(true);
-    setGenerationStatus("Rigenerazione in corso...");
     try {
       await updateProfile(profile, true);
-      setGenerationStatus("Dati rigenerati.");
-    } catch (error) {
-      setGenerationStatus("Rigenerazione non riuscita.");
-    } finally {
-      setIsGenerating(false);
-    }
+    } catch (error) {}
   };
   const rerunSimulation = async () => {
     if (isSimulating) return;
     const request = latestProfileRequest();
+    const operation = simulationRequests.current.claim();
     setIsSimulating(true);
     setSimulationStatus("Simulazione in corso...");
     try {
@@ -455,18 +508,22 @@ function App() {
       const result = await response.json();
       if (!response.ok)
         throw new Error(result.error?.message || "Simulazione non completata.");
-      if (!isCurrentProfileRequest(request)) {
-        setSimulationStatus("");
+      if (
+        !isCurrentProfileRequest(request) ||
+        !simulationRequests.current.isCurrent(operation)
+      )
         return;
-      }
       setSeason(result);
       setSimulationStatus("Simulazione aggiornata.");
     } catch (error) {
-      setSimulationStatus(
-        isCurrentProfileRequest(request) ? "Simulazione non riuscita." : "",
-      );
+      if (
+        isCurrentProfileRequest(request) &&
+        simulationRequests.current.isCurrent(operation)
+      )
+        setSimulationStatus("Simulazione non riuscita.");
     } finally {
-      setIsSimulating(false);
+      if (simulationRequests.current.isCurrent(operation))
+        setIsSimulating(false);
     }
   };
   const nav = [
@@ -509,7 +566,7 @@ function App() {
       </main>
     );
   const datasetState = datasetFreshness(profile, data);
-  const simulationState = simulationFreshness(data, season);
+  const simulationState = simulationFreshness(profile, data, season);
   return (
     <main className="app-shell">
       <header className="app-header">

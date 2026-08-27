@@ -14,17 +14,20 @@ const missesRequiredSource = (profile, fingerprints) => {
 
 export const datasetFreshness = (profile, data) => {
   const meta = data?.meta?.profile;
-  if (!meta?.profile_hash) return "dataset da rigenerare";
-  if (meta.profile_hash !== profile?.configuration_hash)
+  if (!meta?.dataset_configuration_hash) return "dataset da rigenerare";
+  if (meta.dataset_configuration_hash !== profile?.dataset_configuration_hash)
     return "dataset da rigenerare";
   if (missesRequiredSource(profile, meta.source_fingerprints))
     return "fonti cambiate";
   return "dataset corrente";
 };
 
-export const simulationFreshness = (data, season) => {
+export const simulationFreshness = (profile, data, season) => {
   const datasetHash = data?.meta?.profile?.dataset_input_hash;
-  return datasetHash && season?.meta?.dataset_input_hash === datasetHash
+  return datasetHash &&
+    season?.meta?.dataset_input_hash === datasetHash &&
+    season?.meta?.simulation_configuration_hash ===
+      profile?.simulation_configuration_hash
     ? "simulazione corrente"
     : "simulazione da aggiornare";
 };

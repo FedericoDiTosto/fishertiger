@@ -26,6 +26,7 @@ from .generate import (
     load_profile,
     resolve_profile,
 )
+from .freshness import dataset_configuration_hash, simulation_configuration_hash
 
 
 def profile_response(profile: Any) -> dict[str, Any]:
@@ -33,7 +34,12 @@ def profile_response(profile: Any) -> dict[str, Any]:
     dataset carries in its metadata, so the UI can tell a stale dataset from a
     current one. `from_dict` ignores the extra key on the way back, and `to_dict`
     stays hash-free so `configuration_hash` cannot hash itself."""
-    return {**profile.to_dict(), "configuration_hash": profile.configuration_hash}
+    return {
+        **profile.to_dict(),
+        "configuration_hash": profile.configuration_hash,
+        "dataset_configuration_hash": dataset_configuration_hash(profile),
+        "simulation_configuration_hash": simulation_configuration_hash(profile),
+    }
 
 
 MAX_BODY_BYTES = 1_000_000

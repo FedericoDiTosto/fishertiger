@@ -3,14 +3,15 @@ import assert from "node:assert/strict";
 import { datasetFreshness, simulationFreshness } from "../src/dataset-freshness.js";
 
 const profile = {
-  configuration_hash: "abc",
+  dataset_configuration_hash: "dataset-config",
+  simulation_configuration_hash: "simulation-config",
   current_sources: [
     { name: "player_list", required: true },
     { name: "league_calendar", required: false },
   ],
   history_sources: [{ name: "stats_2024_25", required: true }],
 };
-const dataset = (meta) => ({ meta: { profile: { profile_hash: "abc", ...meta } } });
+const dataset = (meta) => ({ meta: { profile: { dataset_configuration_hash: "dataset-config", ...meta } } });
 
 test("a dataset generated from the active profile is current", () => {
   assert.equal(datasetFreshness(profile, dataset({})), "dataset corrente");
@@ -42,8 +43,15 @@ test("a source the profile no longer declares counts as required", () => {
 
 test("a profile edited after generation needs a regeneration", () => {
   assert.equal(
-    datasetFreshness({ ...profile, configuration_hash: "changed" }, dataset({})),
+    datasetFreshness({ ...profile, dataset_configuration_hash: "changed" }, dataset({})),
     "dataset da rigenerare",
+  );
+});
+
+test("save-only profile changes do not make a dataset stale", () => {
+  assert.equal(
+    datasetFreshness({ ...profile, name: "Renamed" }, dataset({})),
+    "dataset corrente",
   );
 });
 
@@ -55,16 +63,20 @@ test("a dataset without freshness metadata is not claimed to be current", () => 
 test("the simulation is current only for the dataset it was run on", () => {
   const data = dataset({ dataset_input_hash: "d1" });
   assert.equal(
-    simulationFreshness(data, { meta: { dataset_input_hash: "d1" } }),
+    simulationFreshness(profile, data, { meta: { dataset_input_hash: "d1", simulation_configuration_hash: "simulation-config" } }),
     "simulazione corrente",
   );
   assert.equal(
-    simulationFreshness(data, { meta: { dataset_input_hash: "d0" } }),
+    simulationFreshness(profile, data, { meta: { dataset_input_hash: "d0", simulation_configuration_hash: "simulation-config" } }),
     "simulazione da aggiornare",
   );
-  assert.equal(simulationFreshness(data, null), "simulazione da aggiornare");
   assert.equal(
-    simulationFreshness(dataset({}), { meta: { dataset_input_hash: "d1" } }),
+    simulationFreshness({ ...profile, simulation_configuration_hash: "changed" }, data, { meta: { dataset_input_hash: "d1", simulation_configuration_hash: "simulation-config" } }),
+    "simulazione da aggiornare",
+  );
+  assert.equal(simulationFreshness(profile, data, null), "simulazione da aggiornare");
+  assert.equal(
+    simulationFreshness(profile, dataset({}), { meta: { dataset_input_hash: "d1", simulation_configuration_hash: "simulation-config" } }),
     "simulazione da aggiornare",
   );
 });

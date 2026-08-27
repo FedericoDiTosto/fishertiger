@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from advisor.league_profile import LeagueProfile
-from advisor.server import create_server
+from advisor.server import create_server, profile_response
 
 
 class LocalApiServerTests(unittest.TestCase):
@@ -56,7 +56,7 @@ class LocalApiServerTests(unittest.TestCase):
         return response, json.loads(payload) if payload else None
 
     def test_profiles_round_trip_and_index(self):
-        expected = {**self.profile, "configuration_hash": LeagueProfile.from_dict(self.profile).configuration_hash}
+        expected = json.loads(json.dumps(profile_response(LeagueProfile.from_dict(self.profile))))
         body = json.dumps(self.profile).encode("utf-8")
         response, payload = self.request("PUT", "/api/profiles/my-team", body, {"Content-Type": "application/json"})
         self.assertEqual(response.status, 200)
@@ -79,6 +79,8 @@ class LocalApiServerTests(unittest.TestCase):
         self.assertEqual(saved["configuration_hash"], LeagueProfile.from_dict(self.profile).configuration_hash)
         _, fetched = self.request("GET", "/api/profiles/my-team")
         self.assertEqual(fetched["configuration_hash"], saved["configuration_hash"])
+        self.assertEqual(fetched["dataset_configuration_hash"], saved["dataset_configuration_hash"])
+        self.assertEqual(fetched["simulation_configuration_hash"], saved["simulation_configuration_hash"])
         _, resaved = self.request("PUT", "/api/profiles/my-team", json.dumps(saved).encode("utf-8"), {"Content-Type": "application/json"})
         self.assertEqual(resaved, saved)
         stored = json.loads((self.server.profiles_dir / "my-team.json").read_text(encoding="utf-8"))

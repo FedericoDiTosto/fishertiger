@@ -34,11 +34,11 @@ export const seasonSimulationPath = (profile) =>
   auctionDatasetPath(profile).replace("auction_data.json", "season_simulation.json");
 
 export const isValidProfileId = (value) =>
-  typeof value === "string" && /^[A-Za-z0-9_-]+$/.test(value);
+  typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value);
 
 const profileId = (value) => {
   if (!isValidProfileId(value))
-    fail("invalid_profile_id", "Profile IDs may contain only letters, numbers, underscores, and hyphens.");
+    fail("invalid_profile_id", "Profile IDs must start with a letter or number and contain at most 64 letters, numbers, underscores, or hyphens.");
   return value;
 };
 
@@ -48,7 +48,7 @@ export const datasetPathError = (profile) => {
     return "";
   } catch (error) {
     if (error instanceof ProfileClientError && error.code === "invalid_profile_id")
-      return "ID profilo non valido: sono ammessi solo lettere, numeri, underscore e trattini.";
+      return "ID profilo non valido: usa al massimo 64 caratteri, iniziando con una lettera o un numero; sono ammessi anche underscore e trattini.";
     return "Profilo non valido: ID e stagione sono obbligatori.";
   }
 };
