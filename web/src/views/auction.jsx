@@ -133,7 +133,8 @@ export default function AuctionView({
       key: storageKey,
       index: defaultUserTeamIndex,
     };
-    if (configuredChanged) writeUserTeamIndex(activeProfileId, defaultUserTeamIndex);
+    if (configuredChanged)
+      writeUserTeamIndex(activeProfileId, defaultUserTeamIndex);
     const nextUserTeam = configuredChanged
       ? defaultUserTeamIndex
       : readUserTeamIndex(activeProfileId, activeRules);
@@ -232,7 +233,11 @@ export default function AuctionView({
     const estimate = Number(advice.summary?.estimatedMarketPrice);
     if (!Number.isFinite(estimate) || estimate < activeRules.auction.minPrice)
       return;
-    const suggested = nearestAuctionPrice(estimate, selectedLegalMax, activeRules);
+    const suggested = nearestAuctionPrice(
+      estimate,
+      selectedLegalMax,
+      activeRules,
+    );
     if (suggested != null) setPrice(String(suggested));
   }, [player, advice, selectedLegalMax, rulesSignature]);
 
@@ -264,11 +269,7 @@ export default function AuctionView({
 
   const bumpPrice = (steps) => {
     priceTouched.current = true;
-    const current = nearestAuctionPrice(
-      price,
-      selectedLegalMax,
-      activeRules,
-    );
+    const current = nearestAuctionPrice(price, selectedLegalMax, activeRules);
     if (current == null) return;
     const next = nearestAuctionPrice(
       current + steps * activeRules.auction.increment,
@@ -300,7 +301,10 @@ export default function AuctionView({
       );
       return;
     }
-    if ((value - activeRules.auction.minPrice) % activeRules.auction.increment) {
+    if (
+      (value - activeRules.auction.minPrice) %
+      activeRules.auction.increment
+    ) {
       say(
         `Il prezzo deve salire di ${activeRules.auction.increment} crediti a partire da ${activeRules.auction.minPrice}.`,
         "stop",
@@ -345,7 +349,10 @@ export default function AuctionView({
         ...current.assigned,
         [playerIdKey(player.id)]: { owner, price: value },
       },
-      history: [...current.history, { playerId: player.id, owner, price: value }],
+      history: [
+        ...current.history,
+        { playerId: player.id, owner, price: value },
+      ],
       undone: [],
     }));
     say(`${player.nome} a ${team.name} per ${value} crediti.`, "go");
@@ -446,7 +453,9 @@ export default function AuctionView({
     setState((current) => ({
       ...current,
       teams: current.teams.map((team, index) =>
-        index === teamIndex ? { ...team, startingCredits: credits, credits } : team,
+        index === teamIndex
+          ? { ...team, startingCredits: credits, credits }
+          : team,
       ),
     }));
   };
@@ -454,7 +463,8 @@ export default function AuctionView({
   const lastTransaction = state.history.at(-1);
   const lastPlayer = lastTransaction
     ? data.players.find(
-        (item) => playerIdKey(item.id) === playerIdKey(lastTransaction.playerId),
+        (item) =>
+          playerIdKey(item.id) === playerIdKey(lastTransaction.playerId),
       )
     : null;
 
@@ -661,7 +671,11 @@ export default function AuctionView({
             </div>
           </section>
 
-          <button type="button" className="btn btn--danger" onClick={flushAuction}>
+          <button
+            type="button"
+            className="btn btn--danger"
+            onClick={flushAuction}
+          >
             Azzera l&apos;asta salvata
           </button>
         </aside>
@@ -693,7 +707,13 @@ function MyTeamBar({
             className="select"
             value={userTeamIndex}
             onChange={(event) => onChangeUserTeam(Number(event.target.value))}
-            style={{ minHeight: 32, fontSize: "var(--fs-xs)", padding: "0 26px 0 8px", width: "auto", maxWidth: "12rem" }}
+            style={{
+              minHeight: 32,
+              fontSize: "var(--fs-xs)",
+              padding: "0 26px 0 8px",
+              width: "auto",
+              maxWidth: "12rem",
+            }}
           >
             {teams.map((item, index) => (
               <option value={index} key={index}>
@@ -703,7 +723,9 @@ function MyTeamBar({
           </select>
           <div className="myteam-credits">
             {team.credits}
-            <span>crediti · {rosterSize}/{totalSlots}</span>
+            <span>
+              crediti · {rosterSize}/{totalSlots}
+            </span>
           </div>
         </div>
         <div className="myteam-max">
@@ -865,7 +887,10 @@ function VerdictCard({
           <div className="gauge-legend">
             <span>
               <i className="k-band" />
-              ideale <b>{idealMin}–{idealMax}</b>
+              ideale{" "}
+              <b>
+                {idealMin}–{idealMax}
+              </b>
             </span>
             <span>
               <i className="k-cap" />
@@ -971,7 +996,9 @@ function RosePlan({ overview }) {
         </div>
         <div className="stat" style={{ textAlign: "right" }}>
           <span className="stat-label">Spendibili</span>
-          <span className="stat-value">{overview.summary.spendableCredits}</span>
+          <span className="stat-value">
+            {overview.summary.spendableCredits}
+          </span>
         </div>
       </div>
       <div className="rows">

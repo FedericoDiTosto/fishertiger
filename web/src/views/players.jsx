@@ -192,7 +192,8 @@ export default function PlayersView({
   );
   const rulesSignature = JSON.stringify(rules ?? data.league_rules ?? null);
   const activeRules = useMemo(
-    () => normalizeRules(rules ?? data.league_rules ?? { startingCredits: 750 }),
+    () =>
+      normalizeRules(rules ?? data.league_rules ?? { startingCredits: 750 }),
     [rulesSignature],
   );
 
@@ -268,12 +269,7 @@ export default function PlayersView({
 
   useEffect(() => setLimit(PAGE), [query, role, team, onlyTargets]);
 
-  const board = useAuctionBoard(
-    showLive,
-    profileId,
-    data.players,
-    activeRules,
-  );
+  const board = useAuctionBoard(showLive, profileId, data.players, activeRules);
   const player = selected || rows[0];
   const mark = player ? playerMark(notes, player.id) : null;
   const live = playerAuctionStatus(board, player);
@@ -601,11 +597,13 @@ export function PlayerDetail({
     <div className="stack">
       <div className="detail-head">
         {showMedia ? <PlayerAvatar player={player} size="medium" /> : null}
-        <RoleChip role={player.ruolo} large />
+        <span className="detail-role">
+          <RoleChip role={player.ruolo} large />
+          {showMedia ? <TeamLogo team={player.team_id} /> : null}
+        </span>
         <div style={{ minWidth: 0, flex: 1 }}>
           <h2>{player.nome}</h2>
           <p>
-            {showMedia ? <TeamLogo team={player.team_id} /> : null}
             {player.squadra} · Mantra {player.ruoli_mantra || "n/d"}
           </p>
         </div>
@@ -679,7 +677,10 @@ export function PlayerDetail({
       {outliers.length ? (
         <div className="notice notice--warn" role="note">
           <b>Valore da verificare</b>
-          <ul className="bullets bullets--warn" style={{ marginTop: "var(--s-2)" }}>
+          <ul
+            className="bullets bullets--warn"
+            style={{ marginTop: "var(--s-2)" }}
+          >
             {outliers.map((outlier) => (
               <li key={outlier.code}>{outlier.label}</li>
             ))}
@@ -814,7 +815,7 @@ function LiveAuctionPanel({
           >
             {board.teams.map((item) => (
               <option value={item.index} key={item.index}>
-                {item.index === board.userTeamIndex ? "→ " : ""}
+                {item.index === board.userTeamIndex ? "→" : ""}
                 {item.name} · {item.credits} cr.
               </option>
             ))}
