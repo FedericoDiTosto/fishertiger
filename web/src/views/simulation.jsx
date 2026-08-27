@@ -224,4 +224,3 @@ function SeasonReport({
     </div>
   );
 }
-

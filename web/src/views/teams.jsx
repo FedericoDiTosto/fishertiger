@@ -274,4 +274,3 @@ export function SetPiecesView({ data, openPlayer }) {
     </div>
   );
 }
-
