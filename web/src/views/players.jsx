@@ -12,8 +12,9 @@ import {
 } from "../auction-live.js";
 import {
   AdviceDetail,
-  RECOMMENDATION_TONE,
-  recommendationLabel,
+  BidGauge,
+  PriceStepper,
+  bidVerdict,
 } from "../auction-advice.jsx";
 import { loadPlayerFilters, savePlayerFilters } from "../player-filters.js";
 import {
@@ -601,7 +602,7 @@ export function PlayerDetail({
           <RoleChip role={player.ruolo} large />
           {showMedia ? <TeamLogo team={player.team_id} /> : null}
         </span>
-        <div style={{ minWidth: 0, flex: 1 }}>
+        <div className="detail-identity">
           <h2>{player.nome}</h2>
           <p>
             {player.squadra} · Mantra {player.ruoli_mantra || "n/d"}
@@ -794,123 +795,129 @@ function LiveAuctionPanel({
     );
 
   const buyer = board.teams[owner];
+  const legalMax = buyer?.maxBid ?? 0;
   const blockedRole = board.activeRole && player.ruolo !== board.activeRole;
   const summary = advice?.summary || {};
   const forOther = owner !== board.userTeamIndex;
+  const { tone, headline, recommendation } = bidVerdict({
+    advice,
+    price,
+    rules,
+    legalMax,
+  });
 
   return (
-    <div className="live-panel">
-      <div className="section-head">
-        <h2 style={{ fontSize: "var(--fs-md)" }}>Assegna in asta</h2>
-        <span className="micro">{buyer?.credits ?? 0} cr. disponibili</span>
-      </div>
+    <div className="stack">
+      <section
+        className={`verdict verdict--bare${tone ? ` is-${tone}` : ""}`}
+        aria-label={`Consiglio d'asta per ${player.nome}`}
+      >
+        <div className="verdict-call">
+          <strong className="verdict-word">{headline}</strong>
+          <span className="verdict-sub">
+            {advice
+              ? `Consiglio: ${recommendation} · confidenza ${Math.round(advice.confidence * 100)}% · ${advice.utility}`
+              : adviceFailure || "Sto valutando la rosa e il mercato."}
+          </span>
+        </div>
 
-      <div className="assign-grid">
-        <label className="field">
-          <span className="field-label">Squadra</span>
-          <select
-            className="select"
-            value={owner}
-            onChange={(event) => setOwner(Number(event.target.value))}
-          >
-            {board.teams.map((item) => (
-              <option value={item.index} key={item.index}>
-                {item.index === board.userTeamIndex ? "→" : ""}
-                {item.name} · {item.credits} cr.
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span className="field-label">Crediti</span>
-          <input
-            ref={priceInput}
-            className="input"
-            type="number"
-            inputMode="numeric"
-            min={rules.auction.minPrice}
-            step={rules.auction.increment}
-            value={price}
-            onChange={(event) => setPrice(event.target.value)}
-            onKeyDown={(event) => event.key === "Enter" && onAssign()}
-            placeholder={String(rules.auction.minPrice)}
+        <BidGauge
+          advice={advice}
+          price={price}
+          rules={rules}
+          legalMax={legalMax}
+        />
+
+        <div className="bidbar">
+          <PriceStepper
+            price={price}
+            rules={rules}
+            legalMax={legalMax}
+            onPrice={setPrice}
+            onSubmit={onAssign}
+            inputRef={priceInput}
           />
-        </label>
-        <button
-          type="button"
-          className="btn btn--primary"
-          onClick={onAssign}
-          disabled={blockedRole}
-        >
-          Assegna
-        </button>
-      </div>
 
-      <p className="micro">
-        {blockedRole
-          ? `Fase ${ROLE_LABELS[board.activeRole].toLowerCase()}: questo ruolo non è ancora in asta.`
-          : `Massimo ${buyer?.maxBid ?? 0} crediti · ${buyer?.slotsLeft?.[player.ruolo] ?? 0} posti ${player.ruolo} liberi.`}
-        {forOther
-          ? " Stai registrando l'acquisto di un'altra squadra: il consiglio resta calcolato sulla tua."
-          : ""}
-      </p>
+          <div className="assign-row">
+            <select
+              className="select"
+              value={owner}
+              onChange={(event) => setOwner(Number(event.target.value))}
+              aria-label="Squadra acquirente"
+            >
+              {board.teams.map((item) => (
+                <option value={item.index} key={item.index}>
+                  {item.index === board.userTeamIndex ? "→ " : ""}
+                  {item.name} · {item.credits} cr.
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={onAssign}
+              disabled={blockedRole}
+            >
+              Assegna
+            </button>
+          </div>
+
+          <div className="bid-foot">
+            <span className="micro">
+              {blockedRole
+                ? `Fase ${ROLE_LABELS[board.activeRole].toLowerCase()}: questo ruolo non è ancora in asta.`
+                : `Massimo ${legalMax} crediti · ${buyer?.slotsLeft?.[player.ruolo] ?? 0} posti ${player.ruolo} liberi.`}
+              {forOther
+                ? " Stai registrando l'acquisto di un'altra squadra: il consiglio resta calcolato sulla tua."
+                : ""}
+            </span>
+          </div>
+        </div>
+
+        <AdviceDetail advice={advice} />
+      </section>
 
       {note}
 
       {advice ? (
-        <>
-          <div
-            className={`live-verdict is-${RECOMMENDATION_TONE[advice.recommendation] || "info"}`}
-          >
-            <strong>{recommendationLabel(advice)}</strong>
-            <span>
-              Fascia ideale {advice.idealMin}–{advice.idealMax} cr. · non
-              superare {advice.maxBid}
+        <div className="detail-figures">
+          <div className="stat">
+            <span className="stat-label">I tuoi crediti</span>
+            <span className="stat-value">{summary.credits ?? "—"}</span>
+            <span className="stat-note">max bid {advice.legalMax}</span>
+          </div>
+          <div className="stat">
+            <span className="stat-label">
+              Budget {ROLE_LABELS[player.ruolo].toLowerCase()}
+            </span>
+            <span className="stat-value">
+              {summary.roleBudgetRemaining ?? "—"}
+            </span>
+            <span className="stat-note">
+              di {summary.roleBudgetTarget ?? "—"} · tetto{" "}
+              {summary.roleBudgetCap ?? "—"}
             </span>
           </div>
-          <div className="detail-figures">
-            <div className="stat">
-              <span className="stat-label">I tuoi crediti</span>
-              <span className="stat-value">{summary.credits ?? "—"}</span>
-              <span className="stat-note">max bid {advice.legalMax}</span>
-            </div>
-            <div className="stat">
-              <span className="stat-label">
-                Budget {ROLE_LABELS[player.ruolo].toLowerCase()}
-              </span>
-              <span className="stat-value">
-                {summary.roleBudgetRemaining ?? "—"}
-              </span>
-              <span className="stat-note">
-                di {summary.roleBudgetTarget ?? "—"} · tetto{" "}
-                {summary.roleBudgetCap ?? "—"}
-              </span>
-            </div>
-            <div className="stat">
-              <span className="stat-label">Concorrenza</span>
-              <span className="stat-value">
-                {summary.opponentAffordable ?? "—"}/
-                {summary.opponentDemand ?? "—"}
-              </span>
-              <span className="stat-note">squadre che possono spendere</span>
-            </div>
-            <div className="stat">
-              <span className="stat-label">Mercato</span>
-              <span className="stat-value">
-                {(summary.marketInflation ?? 1).toFixed(2)}x
-              </span>
-              <span className="stat-note">
-                scarsità ruolo {Math.round((summary.roleScarcity ?? 0) * 100)}%
-              </span>
-            </div>
+          <div className="stat">
+            <span className="stat-label">Concorrenza</span>
+            <span className="stat-value">
+              {summary.opponentAffordable ?? "—"}/
+              {summary.opponentDemand ?? "—"}
+            </span>
+            <span className="stat-note">squadre che possono spendere</span>
           </div>
-          <AdviceDetail advice={advice} />
-        </>
-      ) : (
-        <p className="micro" role="status">
-          {adviceFailure || "Calcolo del consiglio in corso..."}
-        </p>
-      )}
+          <div className="stat">
+            <span className="stat-label">Mercato</span>
+            <span className="stat-value">
+              {(summary.marketInflation ?? 1).toFixed(2)}x
+            </span>
+            <span className="stat-note">
+              scarsità ruolo {Math.round((summary.roleScarcity ?? 0) * 100)}%
+            </span>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
+
 }

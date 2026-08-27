@@ -22,8 +22,9 @@ import {
 } from "../auction-live.js";
 import {
   AdviceDetail,
-  RECOMMENDATION_TONE,
-  recommendationLabel,
+  BidGauge,
+  PriceStepper,
+  bidVerdict,
 } from "../auction-advice.jsx";
 import {
   Empty,
@@ -33,10 +34,6 @@ import {
   ROLE_LABELS,
   formatTier,
 } from "../ui.jsx";
-
-const STEPS = [-5, -1, 1, 5];
-
-const clampPercent = (value) => Math.max(0, Math.min(100, value));
 
 /**
  * Live auction.
@@ -265,18 +262,6 @@ export default function AuctionView({
     setPrice("");
     setSuggestionsOpen(false);
     setMessage(null);
-  };
-
-  const bumpPrice = (steps) => {
-    priceTouched.current = true;
-    const current = nearestAuctionPrice(price, selectedLegalMax, activeRules);
-    if (current == null) return;
-    const next = nearestAuctionPrice(
-      current + steps * activeRules.auction.increment,
-      selectedLegalMax,
-      activeRules,
-    );
-    if (next != null) setPrice(String(next));
   };
 
   const assign = () => {
@@ -587,7 +572,6 @@ export default function AuctionView({
                 priceTouched.current = true;
                 setPrice(value);
               }}
-              onStep={bumpPrice}
               onAssign={assign}
               onCancel={resetSelection}
               onOpenPlayer={() => openPlayer(player)}
@@ -765,60 +749,19 @@ function VerdictCard({
   userTeamIndex,
   onOwner,
   onPrice,
-  onStep,
   onAssign,
   onCancel,
   onOpenPlayer,
 }) {
-  const value = Number(price);
-  const hasPrice = Number.isFinite(value) && value > 0;
-  const market = Number(advice?.summary?.estimatedMarketPrice);
-  const maxBid = Number(advice?.maxBid ?? 0);
-  const idealMin = Number(advice?.idealMin ?? 0);
-  const idealMax = Number(advice?.idealMax ?? 0);
-
   /* The headline answers the question actually being asked at the table — "at
      this price, yes or no?" — so it follows the live number, not the static
      recommendation. The recommendation stays underneath as the reference. */
-  const unaffordable = maxBid < rules.auction.minPrice;
-  const priceTone = unaffordable
-    ? "stop"
-    : value > legalMax || value > maxBid
-      ? "stop"
-      : value > idealMax
-        ? "warn"
-        : "go";
-  const tone = !advice
-    ? null
-    : hasPrice
-      ? priceTone
-      : RECOMMENDATION_TONE[advice.recommendation] || null;
-
-  const recommendation = recommendationLabel(advice);
-  const headline = !advice
-    ? "Calcolo…"
-    : unaffordable
-      ? "Non acquistabile"
-      : !hasPrice
-        ? recommendation
-        : value > legalMax
-          ? "Fuori budget"
-          : value > maxBid
-            ? "Troppo caro"
-            : value > idealMax
-              ? "Ancora accettabile"
-              : recommendation;
-
-  /* The scale is framed on the decision, not on the whole wallet: anchoring it
-     to the legal ceiling would squeeze every marker into the first few pixels. */
-  const anchor = Math.max(
-    maxBid,
-    Number.isFinite(market) ? market : 0,
-    hasPrice ? value : 0,
-    rules.auction.minPrice,
-  );
-  const scale = Math.max(anchor * 1.25, anchor + 4);
-  const pct = (input) => clampPercent((input / scale) * 100);
+  const { tone, headline, recommendation } = bidVerdict({
+    advice,
+    price,
+    rules,
+    legalMax,
+  });
 
   const forOther = owner !== userTeamIndex;
 
@@ -853,95 +796,16 @@ function VerdictCard({
         </span>
       </div>
 
-      {advice && maxBid >= rules.auction.minPrice ? (
-        <div className="gauge">
-          <div
-            className="gauge-track"
-            style={{
-              "--ideal-start": `${pct(idealMin)}%`,
-              "--ideal-width": `${Math.max(0, pct(idealMax) - pct(idealMin))}%`,
-              "--now": `${hasPrice ? pct(value) : 0}%`,
-            }}
-          >
-            <span className="gauge-fill" />
-            <span className="gauge-band" />
-            {Number.isFinite(market) ? (
-              <span
-                className="gauge-mark gauge-mark--market"
-                style={{ "--at": `${pct(market)}%` }}
-              />
-            ) : null}
-            <span
-              className="gauge-mark gauge-mark--cap"
-              style={{ "--at": `${pct(maxBid)}%` }}
-            />
-            {hasPrice ? (
-              <span
-                className="gauge-thumb"
-                style={{ "--now": `${pct(value)}%` }}
-              >
-                {value}
-              </span>
-            ) : null}
-          </div>
-          <div className="gauge-legend">
-            <span>
-              <i className="k-band" />
-              ideale{" "}
-              <b>
-                {idealMin}–{idealMax}
-              </b>
-            </span>
-            <span>
-              <i className="k-cap" />
-              non superare <b>{maxBid}</b>
-            </span>
-            {Number.isFinite(market) ? (
-              <span>
-                <i className="k-market" />
-                mercato <b>{market}</b>
-              </span>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+      <BidGauge advice={advice} price={price} rules={rules} legalMax={legalMax} />
 
       <div className="bidbar">
-        <div className="stepper">
-          {STEPS.slice(0, 2).map((step) => (
-            <button
-              key={step}
-              type="button"
-              onClick={() => onStep(step)}
-              aria-label={`Riduci di ${Math.abs(step * rules.auction.increment)}`}
-            >
-              {step * rules.auction.increment}
-            </button>
-          ))}
-          <input
-            className="input"
-            type="number"
-            inputMode="numeric"
-            min={rules.auction.minPrice}
-            max={legalMax}
-            step={rules.auction.increment}
-            value={price}
-            onChange={(event) => onPrice(event.target.value)}
-            onKeyDown={(event) => event.key === "Enter" && onAssign()}
-            placeholder="Prezzo"
-            aria-label="Prezzo di acquisto in crediti"
-          />
-          {STEPS.slice(2).map((step) => (
-            <button
-              key={step}
-              type="button"
-              onClick={() => onStep(step)}
-              aria-label={`Aumenta di ${step * rules.auction.increment}`}
-            >
-              +{step * rules.auction.increment}
-            </button>
-          ))}
-        </div>
+        <PriceStepper
+          price={price}
+          rules={rules}
+          legalMax={legalMax}
+          onPrice={onPrice}
+          onSubmit={onAssign}
+        />
 
         <div className="assign-row">
           <select

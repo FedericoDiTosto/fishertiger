@@ -296,9 +296,15 @@
 
 .detail-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: var(--s-3);
   margin-bottom: var(--s-3);
+}
+
+.detail-identity {
+  flex: 1 1 9rem;
+  min-width: 0;
 }
 
 .detail-head h2 {
@@ -674,24 +680,41 @@
   flex: 0 0 auto;
   align-items: center;
   gap: var(--s-2);
+  margin-left: auto;
 }
 
 .player-row.is-target {
   box-shadow: inset 2px 0 0 var(--c-warn);
 }
 
-.player-row.is-live-taken {
-  opacity: 0.62;
+.player-row.is-live-taken,
+.player-row.is-live-mine {
+  background: var(--c-surface-2);
 }
 
 .player-row.is-live-mine {
-  box-shadow: inset 2px 0 0 var(--c-go);
+  background: var(--c-info-tint);
 }
 
-.player-row.is-live-mine.is-target {
-  box-shadow:
-    inset 2px 0 0 var(--c-go),
-    inset 0 -1px 0 var(--c-warn);
+.player-row.is-live-taken .row-title,
+.player-row.is-live-mine .row-title,
+.player-row.is-live-taken .player-metric b,
+.player-row.is-live-mine .player-metric b,
+.player-row.is-live-taken .live-cell b,
+.player-row.is-live-mine .live-cell b {
+  color: var(--c-text-mute);
+  font-weight: 600;
+}
+
+.player-row.is-live-taken .role-chip,
+.player-row.is-live-mine .role-chip,
+.player-row.is-live-taken .avail,
+.player-row.is-live-mine .avail,
+.player-row.is-live-taken .player-avatar,
+.player-row.is-live-mine .player-avatar,
+.player-row.is-live-taken .team-logo,
+.player-row.is-live-mine .team-logo {
+  opacity: 0.45;
 }
 
 .note-flag {
@@ -785,7 +808,7 @@
 }
 
 .live-legend .k-mine {
-  background: var(--c-go);
+  background: var(--c-info);
 }
 
 .live-legend .k-taken {
@@ -803,76 +826,6 @@
   border: 1px solid var(--c-line);
   border-radius: var(--r-lg);
   background: var(--c-surface-2);
-}
-
-.assign-grid {
-  display: grid;
-  gap: var(--s-2);
-  grid-template-columns: minmax(0, 1fr);
-}
-
-@media (min-width: 420px) and (max-width: 999px) {
-  .assign-grid {
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
-    align-items: end;
-  }
-}
-
-@media (min-width: 1000px) {
-  .assign-grid {
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: end;
-  }
-
-  .assign-grid > .field:first-child {
-    grid-column: 1 / -1;
-  }
-}
-
-.live-verdict {
-  display: grid;
-  gap: 2px;
-  padding: var(--s-2) var(--s-3);
-  border: 1px solid var(--c-line);
-  border-radius: var(--r-md);
-  background: var(--c-surface);
-}
-
-.live-verdict strong {
-  font-size: var(--fs-lg);
-  font-weight: 700;
-}
-
-.live-verdict span {
-  color: var(--c-text-dim);
-  font-size: var(--fs-xs);
-}
-
-.live-verdict.is-go {
-  border-color: color-mix(in srgb, var(--c-go) 40%, transparent);
-  background: var(--c-go-tint);
-}
-
-.live-verdict.is-go strong {
-  color: var(--c-go);
-}
-
-.live-verdict.is-warn {
-  border-color: color-mix(in srgb, var(--c-warn) 40%, transparent);
-  background: var(--c-warn-tint);
-}
-
-.live-verdict.is-warn strong {
-  color: var(--c-warn);
-}
-
-.live-verdict.is-stop {
-  border-color: color-mix(in srgb, var(--c-stop) 40%, transparent);
-  background: var(--c-stop-tint);
-}
-
-.live-verdict.is-stop strong {
-  color: var(--c-stop);
 }
 
 .textarea {
