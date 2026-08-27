@@ -624,3 +624,257 @@
   border-radius: var(--r-sm);
   padding-inline: var(--s-2);
 }
+
+.row.row--framed {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--s-2);
+  padding-inline: var(--s-2) var(--s-3);
+}
+
+.row-hit {
+  display: flex;
+  align-self: stretch;
+  align-items: center;
+  gap: var(--s-3);
+  min-width: 0;
+  color: inherit;
+}
+
+.row-hit > .row-main {
+  flex: 1 1 auto;
+}
+
+.row-hit > .role-chip,
+.row-hit > .player-avatar,
+.row-hit > .player-metric {
+  flex: 0 0 auto;
+}
+
+.row-star {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-sm);
+  color: var(--c-text-mute);
+  transition: color var(--t-fast) var(--ease);
+}
+
+.row-star:hover {
+  color: var(--c-text);
+}
+
+.row-star[aria-pressed="true"],
+.target-toggle.is-target {
+  color: var(--c-warn);
+}
+
+.detail-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.player-row.is-target {
+  box-shadow: inset 2px 0 0 var(--c-warn);
+}
+
+.player-row.is-live-taken {
+  opacity: 0.62;
+}
+
+.player-row.is-live-mine {
+  box-shadow: inset 2px 0 0 var(--c-go);
+}
+
+.player-row.is-live-mine.is-target {
+  box-shadow:
+    inset 2px 0 0 var(--c-go),
+    inset 0 -1px 0 var(--c-warn);
+}
+
+.note-flag {
+  margin-left: 5px;
+  color: var(--c-text-mute);
+  vertical-align: middle;
+}
+
+.player-avatar {
+  flex: 0 0 auto;
+  width: auto;
+  height: 34px;
+  max-width: 40px;
+  object-fit: contain;
+}
+
+.player-avatar--lg {
+  height: 64px;
+  max-width: 72px;
+}
+
+.team-logo {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+  object-fit: contain;
+  vertical-align: middle;
+}
+
+.detail-head .team-logo {
+  width: 22px;
+  height: 22px;
+  margin-right: 7px;
+}
+
+.live-cell {
+  display: grid;
+  gap: 1px;
+  justify-items: end;
+  min-width: 72px;
+  text-align: right;
+}
+
+.live-cell b {
+  overflow: hidden;
+  max-width: 88px;
+  font-size: var(--fs-xs);
+  font-weight: 660;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-cell small {
+  color: var(--c-text-mute);
+  font-size: var(--fs-2xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.live-assign-open {
+  flex: 0 0 auto;
+}
+
+.live-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-4);
+  align-items: center;
+  margin-bottom: var(--s-3);
+  color: var(--c-text-dim);
+  font-size: var(--fs-xs);
+}
+
+.live-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.live-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.live-legend .k-mine {
+  background: var(--c-go);
+}
+
+.live-legend .k-taken {
+  background: var(--c-text-mute);
+}
+
+.live-legend-count {
+  color: var(--c-text-mute);
+}
+
+.live-panel {
+  display: grid;
+  gap: var(--s-3);
+  padding: var(--s-3);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-lg);
+  background: var(--c-surface-2);
+}
+
+.assign-grid {
+  display: grid;
+  gap: var(--s-2);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 420px) and (max-width: 999px) {
+  .assign-grid {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+    align-items: end;
+  }
+}
+
+@media (min-width: 1000px) {
+  .assign-grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+  }
+
+  .assign-grid > .field:first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+.live-verdict {
+  display: grid;
+  gap: 2px;
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-md);
+  background: var(--c-surface);
+}
+
+.live-verdict strong {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+
+.live-verdict span {
+  color: var(--c-text-dim);
+  font-size: var(--fs-xs);
+}
+
+.live-verdict.is-go {
+  border-color: color-mix(in srgb, var(--c-go) 40%, transparent);
+  background: var(--c-go-tint);
+}
+
+.live-verdict.is-go strong {
+  color: var(--c-go);
+}
+
+.live-verdict.is-warn {
+  border-color: color-mix(in srgb, var(--c-warn) 40%, transparent);
+  background: var(--c-warn-tint);
+}
+
+.live-verdict.is-warn strong {
+  color: var(--c-warn);
+}
+
+.live-verdict.is-stop {
+  border-color: color-mix(in srgb, var(--c-stop) 40%, transparent);
+  background: var(--c-stop-tint);
+}
+
+.live-verdict.is-stop strong {
+  color: var(--c-stop);
+}
+
+.textarea {
+  min-height: 5rem;
+  padding: var(--s-2) var(--s-3);
+  line-height: var(--lh-snug);
+  resize: vertical;
+}
+
+.player-row.is-selected {
+  box-shadow: inset 3px 0 0 var(--c-brand);
+}

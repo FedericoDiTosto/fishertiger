@@ -451,9 +451,7 @@
   min-width: 0;
 }
 
-.verdict-more {
-  display: grid;
-  gap: var(--s-2);
+.verdict .verdict-more {
   padding: 0 var(--s-4) var(--s-4);
 }
 

@@ -15,7 +15,17 @@ import {
 } from "../auction-state.js";
 import { normalizeRules } from "../league-rules.js";
 import {
-  Disclosure,
+  defaultUserTeamIndex as configuredUserTeamIndex,
+  notifyAuctionChanged,
+  readUserTeamIndex,
+  writeUserTeamIndex,
+} from "../auction-live.js";
+import {
+  AdviceDetail,
+  RECOMMENDATION_TONE,
+  recommendationLabel,
+} from "../auction-advice.jsx";
+import {
   Empty,
   Icon,
   PlayerRow,
@@ -23,22 +33,6 @@ import {
   ROLE_LABELS,
   formatTier,
 } from "../ui.jsx";
-
-const RECOMMENDATION_LABELS = {
-  STRONG_BUY: "Compra",
-  BID: "Conviene",
-  VALUE_ONLY: "Solo al prezzo giusto",
-  PASS: "Lascia andare",
-  INELIGIBLE: "Non acquistabile",
-};
-
-const RECOMMENDATION_TONE = {
-  STRONG_BUY: "go",
-  BID: "go",
-  VALUE_ONLY: "warn",
-  PASS: "stop",
-  INELIGIBLE: "stop",
-};
 
 const STEPS = [-5, -1, 1, 5];
 
@@ -70,15 +64,7 @@ export default function AuctionView({
   );
   const storageKey = auctionStorageKey(activeProfileId);
   const rulesSignature = JSON.stringify(activeRules);
-  const configuredUserIndex = Number(activeRules.userTeam);
-  const defaultUserTeamIndex = Math.max(
-    0,
-    Number.isInteger(configuredUserIndex) &&
-      configuredUserIndex >= 0 &&
-      configuredUserIndex < activeRules.participants
-      ? configuredUserIndex
-      : (activeRules.teamNames?.indexOf(activeRules.userTeam) ?? -1),
-  );
+  const defaultUserTeamIndex = configuredUserTeamIndex(activeRules);
 
   const loadAuction = () => {
     try {
@@ -97,7 +83,9 @@ export default function AuctionView({
   };
 
   const [state, setState] = useState(loadAuction);
-  const [userTeamIndex, setUserTeamIndex] = useState(defaultUserTeamIndex);
+  const [userTeamIndex, setUserTeamIndex] = useState(() =>
+    readUserTeamIndex(activeProfileId, activeRules),
+  );
   const { query, price } = draft;
   const setQuery = (value) =>
     setDraft((current) => ({ ...current, query: value }));
@@ -120,6 +108,10 @@ export default function AuctionView({
   const priceTouched = useRef(false);
   const resetSignature = `${storageKey}|${rulesSignature}|${defaultUserTeamIndex}`;
   const lastResetSignature = useRef(resetSignature);
+  const lastConfiguredUserTeam = useRef({
+    key: storageKey,
+    index: defaultUserTeamIndex,
+  });
 
   const workerHistory = state.history.flatMap((transaction) => {
     const transactionPlayer = data.players.find(
@@ -134,8 +126,19 @@ export default function AuctionView({
   useEffect(() => {
     skipPersist.current = true;
     setState(loadAuction());
-    setUserTeamIndex(defaultUserTeamIndex);
-    setOwner(defaultUserTeamIndex);
+    const configuredChanged =
+      lastConfiguredUserTeam.current.key === storageKey &&
+      lastConfiguredUserTeam.current.index !== defaultUserTeamIndex;
+    lastConfiguredUserTeam.current = {
+      key: storageKey,
+      index: defaultUserTeamIndex,
+    };
+    if (configuredChanged) writeUserTeamIndex(activeProfileId, defaultUserTeamIndex);
+    const nextUserTeam = configuredChanged
+      ? defaultUserTeamIndex
+      : readUserTeamIndex(activeProfileId, activeRules);
+    setUserTeamIndex(nextUserTeam);
+    setOwner(nextUserTeam);
     if (lastResetSignature.current !== resetSignature) {
       setPlayer(null);
       setQuery("");
@@ -150,6 +153,7 @@ export default function AuctionView({
       return;
     }
     localStorage.setItem(storageKey, JSON.stringify(serializeAuction(state)));
+    notifyAuctionChanged();
   }, [state, storageKey]);
 
   useEffect(() => {
@@ -476,6 +480,8 @@ export default function AuctionView({
             onChangeUserTeam={(index) => {
               setUserTeamIndex(index);
               setOwner(index);
+              writeUserTeamIndex(activeProfileId, index);
+              notifyAuctionChanged();
             }}
           />
 
@@ -766,8 +772,7 @@ function VerdictCard({
       ? priceTone
       : RECOMMENDATION_TONE[advice.recommendation] || null;
 
-  const recommendation =
-    RECOMMENDATION_LABELS[advice?.recommendation] || "Valuta";
+  const recommendation = recommendationLabel(advice);
   const headline = !advice
     ? "Calcolo…"
     : unaffordable
@@ -950,54 +955,7 @@ function VerdictCard({
         </div>
       </div>
 
-      {advice ? (
-        <div className="verdict-more">
-          <Disclosure summary="Perché" badge={`${advice.reasons.length}`}>
-            <ul className="bullets">
-              {advice.reasons.slice(0, 4).map((reason) => (
-                <li key={reason}>{reason}</li>
-              ))}
-            </ul>
-          </Disclosure>
-          <Disclosure
-            summary="Attenzione"
-            badge={advice.risks.length ? `${advice.risks.length}` : "0"}
-          >
-            {advice.risks.length ? (
-              <ul className="bullets bullets--warn">
-                {advice.risks.slice(0, 4).map((risk) => (
-                  <li key={risk}>{risk}</li>
-                ))}
-              </ul>
-            ) : (
-              <p className="micro">Nessun rischio specifico rilevato.</p>
-            )}
-          </Disclosure>
-          {advice.alternatives.length ? (
-            <Disclosure
-              summary="Alternative nello stesso ruolo"
-              badge={`${advice.alternatives.length}`}
-            >
-              <div className="rows">
-                {advice.alternatives.map((alternative) => (
-                  <div className="row" key={alternative.id}>
-                    <RoleChip role={alternative.role} />
-                    <span className="row-main">
-                      <span className="row-title">{alternative.name}</span>
-                      <span className="row-sub">
-                        differenza di valore {alternative.valueGap}
-                      </span>
-                    </span>
-                    <span className="row-value">
-                      ≈ {alternative.estimatedCost}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </Disclosure>
-          ) : null}
-        </div>
-      ) : null}
+      <AdviceDetail advice={advice} />
     </section>
   );
 }

@@ -28,9 +28,25 @@ import SimulationView from "./views/simulation.jsx";
 import AuctionView from "./views/auction.jsx";
 
 const TABS = [
-  { id: "sintesi", label: "Sintesi", icon: "home", views: [["overview", "Sintesi"]] },
-  { id: "listone", label: "Listone", icon: "list", views: [["players", "Listone"]] },
-  { id: "asta", label: "Asta", icon: "gavel", hero: true, views: [["auction", "Asta"]] },
+  {
+    id: "sintesi",
+    label: "Sintesi",
+    icon: "home",
+    views: [["overview", "Sintesi"]],
+  },
+  {
+    id: "listone",
+    label: "Listone",
+    icon: "list",
+    views: [["players", "Listone"]],
+  },
+  {
+    id: "asta",
+    label: "Asta",
+    icon: "gavel",
+    hero: true,
+    views: [["auction", "Asta"]],
+  },
   {
     id: "squadre",
     label: "Squadre",
@@ -240,7 +256,10 @@ function App() {
 
   useEffect(() => {
     const initialRoute = { view: "overview", player: null, team: null };
-    window.history.replaceState({ fantaRoute: initialRoute, fantaIndex: 0 }, "");
+    window.history.replaceState(
+      { fantaRoute: initialRoute, fantaIndex: 0 },
+      "",
+    );
     const restoreRoute = (event) => {
       const route = event.state?.fantaRoute;
       if (!route) return;
@@ -255,6 +274,7 @@ function App() {
     nextView,
     { player = selectedPlayer, team = selectedTeam } = {},
   ) => {
+    if (nextView !== "players") setListRole(null);
     const route = { view: nextView, player, team };
     setViewHistory((routes) => [...routes.slice(0, historyIndex + 1), route]);
     setHistoryIndex((index) => index + 1);
@@ -333,7 +353,9 @@ function App() {
       });
       const payload = await response.json();
       if (!response.ok || !payload.dataset_path)
-        throw new Error(payload.error?.message || "Generazione non completata.");
+        throw new Error(
+          payload.error?.message || "Generazione non completata.",
+        );
       const nextData = await loadDatasetUrl(
         apiUrl(`/api/datasets/${payload.dataset_path}`, apiBase),
         { profile: activeProfile },
@@ -432,7 +454,9 @@ function App() {
   const exportProfile = () => {
     if (!profile) return;
     const url = URL.createObjectURL(
-      new Blob([JSON.stringify(profile, null, 2)], { type: "application/json" }),
+      new Blob([JSON.stringify(profile, null, 2)], {
+        type: "application/json",
+      }),
     );
     const link = document.createElement("a");
     link.href = url;
@@ -491,7 +515,9 @@ function App() {
         <select
           className="select"
           id="profile-select"
-          value={profiles.includes(profile?.profile_id) ? profile.profile_id : ""}
+          value={
+            profiles.includes(profile?.profile_id) ? profile.profile_id : ""
+          }
           onChange={(event) => selectProfile(event.target.value)}
         >
           <option value="">Profilo predefinito</option>
@@ -606,8 +632,8 @@ function App() {
             <span className="kicker">Configurazione iniziale</span>
             <h1>Genera il tuo dataset</h1>
             <p>
-              Carica il calendario della tua lega in Impostazioni e genera i dati
-              per iniziare.
+              Carica il calendario della tua lega in Impostazioni e genera i
+              dati per iniziare.
             </p>
           </div>
           {profilePicker}
@@ -637,7 +663,9 @@ function App() {
     <>
       <header className="topbar">
         <button className="brand" onClick={() => navigate("overview")}>
-          <span className="brand-mark" aria-hidden="true">FT</span>
+          <span className="brand-mark" aria-hidden="true">
+            FT
+          </span>
           <span className="brand-text">
             <strong>Fishertiger</strong>
             <span>{profile?.season?.season || "FANTACALCIO"}</span>
@@ -695,6 +723,7 @@ function App() {
             <PlayersView
               data={data}
               rules={activeRules}
+              profileId={activeProfileId}
               selected={selectedPlayer}
               setSelected={setSelectedPlayer}
               initialRole={listRole}
@@ -767,7 +796,9 @@ function App() {
             onClick={() => navigate(item.views[0][0])}
             aria-current={item.id === tab.id ? "page" : undefined}
           >
-            <span className="tab-icon"><Icon name={item.icon} /></span>
+            <span className="tab-icon">
+              <Icon name={item.icon} />
+            </span>
             {item.label}
           </button>
         ))}
@@ -795,11 +826,19 @@ function App() {
           </div>
           <div className="notice">{simulationState}</div>
           <p className="micro">
-            Generato il {data.meta?.generato_il?.slice(0, 10) || "n/d"} · profilo{" "}
-            {activeProfileId}
+            Generato il {data.meta?.generato_il?.slice(0, 10) || "n/d"} ·
+            profilo {activeProfileId}
           </p>
-          {generationStatus ? <p className="micro" role="status">{generationStatus}</p> : null}
-          {profileError ? <p className="notice notice--stop" role="alert">{profileError}</p> : null}
+          {generationStatus ? (
+            <p className="micro" role="status">
+              {generationStatus}
+            </p>
+          ) : null}
+          {profileError ? (
+            <p className="notice notice--stop" role="alert">
+              {profileError}
+            </p>
+          ) : null}
           <button
             type="button"
             className="btn btn--primary btn--block"
