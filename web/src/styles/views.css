@@ -670,9 +670,11 @@
   color: var(--c-text);
 }
 
+/* Targets are a personal mark, not a verdict: they wear the brand indigo so the
+   saturated go / warn / stop stay unambiguous at the auction. */
 .row-star[aria-pressed="true"],
 .target-toggle.is-target {
-  color: var(--c-warn);
+  color: var(--c-brand-bright);
 }
 
 .detail-actions {
@@ -684,7 +686,7 @@
 }
 
 .player-row.is-target {
-  box-shadow: inset 2px 0 0 var(--c-warn);
+  box-shadow: inset 2px 0 0 var(--c-brand);
 }
 
 .player-row.is-live-taken,
