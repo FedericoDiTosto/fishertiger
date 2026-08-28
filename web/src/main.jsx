@@ -7,6 +7,7 @@ import { createRequestGate } from "./latest-request.js";
 import { datasetFreshness, simulationFreshness } from "./dataset-freshness.js";
 import { emptyDraft } from "./auction-state.js";
 import { Updates } from "./updates.jsx";
+import { clearProfileBrowserData } from "./profile-storage.js";
 import {
   apiUrl,
   auctionDatasetPath,
@@ -101,7 +102,7 @@ const writeStoredProfileId = (id) => {
 };
 
 function App() {
-  const [data, setData] = useState(null);
+  const [dataset, setDataset] = useState(null);
   const [season, setSeason] = useState(null);
   const [profile, setProfile] = useState(null);
   const [profileError, setProfileError] = useState("");
@@ -125,6 +126,7 @@ function App() {
   // An empty override deliberately enables same-origin requests behind Docker.
   const apiBase =
     import.meta.env.VITE_LOCAL_API_BASE ?? "http://127.0.0.1:8000";
+  const loadedProfileId = useRef(null);
   const profileRequests = useRef(null);
   const generationRequests = useRef(null);
   const simulationRequests = useRef(null);
@@ -155,6 +157,33 @@ function App() {
     invalidateSimulation();
   };
 
+  const applyDataset = (nextData, nextProfile) => {
+    const id =
+      nextProfile?.profile_id ||
+      nextData?.meta?.profile?.profile_id ||
+      "default";
+    const switched = loadedProfileId.current !== id;
+    loadedProfileId.current = id;
+    setDataset({ data: nextData, profile: nextProfile, profileId: id });
+    const fallbackTeam = nextData?.teams?.[0]?.squadra || null;
+    if (switched) {
+      setSelectedPlayer(null);
+      setSelectedTeam(fallbackTeam);
+      setAuctionDraft(emptyDraft());
+      setListRole(null);
+    } else {
+      setSelectedTeam((team) => team || fallbackTeam);
+    }
+  };
+
+  const clearDataset = () => {
+    loadedProfileId.current = null;
+    setDataset(null);
+    setSelectedPlayer(null);
+    setSelectedTeam(null);
+    setAuctionDraft(emptyDraft());
+  };
+
   useEffect(() => {
     let cancelled = false;
     const request = claimProfileRequest();
@@ -183,13 +212,12 @@ function App() {
     if (!profile) return;
     if (generatedProfileCommit.current === profile) {
       generatedProfileCommit.current = null;
-      setAuctionDraft(emptyDraft());
       return;
     }
     const pathError = datasetPathError(profile);
     if (pathError) {
       setProfileError(pathError);
-      setData(null);
+      clearDataset();
       setSeason(null);
       return;
     }
@@ -197,12 +225,10 @@ function App() {
     const datasetPath = auctionDatasetPath(profile);
     loadDatasetUrl(apiUrl(`/api/datasets/${datasetPath}`, apiBase), { profile })
       .then((nextData) => {
-        if (cancelled) return;
-        setData(nextData);
-        setSelectedTeam((team) => team || nextData.teams[0]?.squadra || null);
+        if (!cancelled) applyDataset(nextData, profile);
       })
       .catch(() => {
-        if (!cancelled) setData(null);
+        if (!cancelled) clearDataset();
       });
     fetch(apiUrl(`/api/datasets/${seasonSimulationPath(profile)}`, apiBase))
       .then((response) => (response.ok ? response.json() : null))
@@ -212,7 +238,6 @@ function App() {
       .catch(() => {
         if (!cancelled) setSeason(null);
       });
-    setAuctionDraft(emptyDraft());
     return () => {
       cancelled = true;
     };
@@ -296,9 +321,9 @@ function App() {
     setListRole(role);
     navigate("players", { player: null });
   };
-  const activeRules = rulesFor(profile, data || {});
-  const activeProfileId =
-    profile?.profile_id || data?.meta?.profile?.profile_id || "default";
+  const data = dataset?.data || null;
+  const activeProfileId = dataset?.profileId || "default";
+  const activeRules = rulesFor(dataset?.profile ?? profile, data || {});
 
   const updateProfile = async (nextProfile, generate = false) => {
     setProfileError("");
@@ -368,8 +393,7 @@ function App() {
       const generatedProfile = { ...activeProfile };
       generatedProfileCommit.current = generatedProfile;
       setProfile(generatedProfile);
-      setData(nextData);
-      setSelectedTeam((team) => team || nextData.teams[0]?.squadra || null);
+      applyDataset(nextData, generatedProfile);
       setSeason(null);
       navigate("overview");
       if (saveWarning) setProfileError(saveWarning);
@@ -426,7 +450,7 @@ function App() {
     if (!id) return;
     if (
       !window.confirm(
-        `Rimuovere il profilo "${id}"? I dati gia generati restano su disco.`,
+        `Rimuovere il profilo "${id}"? I dati gia generati restano su disco, note, filtri e asta salvati in questo browser vengono cancellati.`,
       )
     )
       return;
@@ -442,6 +466,7 @@ function App() {
       );
       return;
     }
+    clearProfileBrowserData(id);
     setProfiles((current) => current.filter((name) => name !== id));
     if (readStoredProfileId() === id) writeStoredProfileId("");
     if (profile?.profile_id === id) {
@@ -497,7 +522,6 @@ function App() {
       );
       writeStoredProfileId(id);
       setProfile(stored || incoming);
-      setAuctionDraft(emptyDraft());
     } catch (error) {
       if (!isCurrentProfileRequest(request)) return;
       setProfileError(
@@ -905,3 +929,4 @@ createRoot(document.getElementById("root")).render(
     </AppErrorBoundary>
   </StrictMode>,
 );
+
