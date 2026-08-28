@@ -2,14 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ImageIcon, Radio, Star, StickyNote } from "lucide-react";
 import { createRoleValuation, sourceFvm } from "../player-valuation.js";
 import { normalizeRules } from "../league-rules.js";
-import { playerIdKey } from "../auction-state.js";
 import {
-  assignPlayerInAuction,
+  assignPlayer,
   playerAuctionStatus,
-  readAuctionBoard,
-  releasePlayerInAuction,
-  subscribeAuctionChanges,
-} from "../auction-live.js";
+  releasePlayer,
+} from "../auction-store.js";
+import { useAuctionBoard } from "../use-auction-store.js";
+import { useAdvisor } from "../use-advisor.js";
+import { reconcileSelectedPlayer } from "../player-selection.js";
 import {
   AdviceDetail,
   BidGauge,
@@ -99,84 +99,6 @@ function TeamLogo({ team }) {
       onError={() => setFailed(true)}
     />
   );
-}
-
-function useAuctionBoard(enabled, profileId, players, rules) {
-  const rulesSignature = JSON.stringify(rules);
-  const read = () =>
-    enabled ? readAuctionBoard(profileId, players, rules) : null;
-  const [board, setBoard] = useState(read);
-  useEffect(() => {
-    const refresh = () => setBoard(read());
-    refresh();
-    if (!enabled) return undefined;
-    return subscribeAuctionChanges(refresh);
-  }, [enabled, profileId, players, rulesSignature]);
-  return board;
-}
-
-function useAuctionAdvice(player, board, players, rules) {
-  const [advice, setAdvice] = useState(null);
-  const [failure, setFailure] = useState("");
-  const worker = useRef(null);
-  const rulesSignature = JSON.stringify(rules);
-  const requestKey =
-    player && board
-      ? [
-          player.id,
-          board.taken,
-          board.userTeamIndex,
-          board.teams[board.userTeamIndex]?.credits,
-          rulesSignature,
-        ].join("|")
-      : "";
-
-  useEffect(
-    () => () => {
-      worker.current?.terminate();
-      worker.current = null;
-    },
-    [],
-  );
-
-  useEffect(() => {
-    if (!requestKey) return setAdvice(null);
-    setAdvice(null);
-    if (!worker.current) {
-      try {
-        worker.current = new Worker(
-          new URL("../simulation.worker.js", import.meta.url),
-          { type: "module" },
-        );
-      } catch {
-        return setFailure("Consigli non disponibili: worker non avviato.");
-      }
-      setFailure("");
-      worker.current.onmessage = (event) => setAdvice(event.data);
-      worker.current.onerror = () =>
-        setFailure("Il calcolo del consiglio non è riuscito.");
-    }
-    worker.current.postMessage({
-      player,
-      owner: board.userTeamIndex,
-      mine: board.teams[board.userTeamIndex],
-      teams: board.teams,
-      remaining: players.filter(
-        (candidate) => !board.assigned[playerIdKey(candidate.id)],
-      ),
-      assigned: board.assigned,
-      history: board.history.flatMap((transaction) => {
-        const bought = players.find(
-          (candidate) =>
-            playerIdKey(candidate.id) === playerIdKey(transaction.playerId),
-        );
-        return bought ? [{ ...transaction, player: bought }] : [];
-      }),
-      rules,
-    });
-  }, [requestKey]);
-
-  return { advice, failure };
 }
 
 export default function PlayersView({
@@ -270,17 +192,20 @@ export default function PlayersView({
 
   useEffect(() => setLimit(PAGE), [query, role, team, onlyTargets]);
 
-  const board = useAuctionBoard(showLive, profileId, data.players, activeRules);
-  const player = selected || rows[0];
+  const board = useAuctionBoard(profileId, data.players, activeRules, showLive);
+  /* The panel drives the assignment, so it may only show a player this dataset
+     still contains and this search still matches. */
+  const player =
+    reconcileSelectedPlayer(selected, data.players, query) || rows[0];
   const mark = player ? playerMark(notes, player.id) : null;
   const live = playerAuctionStatus(board, player);
   const targets = targetCount(notes);
-  const { advice, failure: adviceFailure } = useAuctionAdvice(
-    live ? null : player,
+  const { advice, failure: adviceFailure } = useAdvisor({
+    player: live ? null : player,
     board,
-    data.players,
-    activeRules,
-  );
+    players: data.players,
+    rules: activeRules,
+  });
 
   useEffect(() => {
     if (board) setAssignOwner(board.userTeamIndex);
@@ -304,7 +229,7 @@ export default function PlayersView({
   };
 
   const runAssign = () => {
-    const result = assignPlayerInAuction(profileId, data.players, activeRules, {
+    const result = assignPlayer(profileId, data.players, activeRules, {
       playerId: player.id,
       owner: assignOwner,
       price: Number(assignPrice),
@@ -315,7 +240,7 @@ export default function PlayersView({
 
   const runRelease = () =>
     setFeedback(
-      releasePlayerInAuction(profileId, data.players, activeRules, player.id),
+      releasePlayer(profileId, data.players, activeRules, player.id),
     );
 
   const detail = player ? (

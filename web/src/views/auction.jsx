@@ -1,25 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { activeNominationRole } from "../auction-nomination.js";
 import {
   auctionStorageKey,
   draftForQuery,
   draftPlayer,
-  emptyAuction,
-  isValidBid,
   legalMaxBid,
   nearestAuctionPrice,
   playerIdKey,
-  rehydrateAuction,
-  serializeAuction,
   slotsLeft,
 } from "../auction-state.js";
 import { normalizeRules } from "../league-rules.js";
 import {
+  assignPlayer,
   defaultUserTeamIndex as configuredUserTeamIndex,
-  notifyAuctionChanged,
-  readUserTeamIndex,
+  redoAssignment,
+  renameTeam,
+  resetAuction,
+  setStartingCredits,
+  undoAssignment,
   writeUserTeamIndex,
-} from "../auction-live.js";
+} from "../auction-store.js";
+import { useAuctionBoard } from "../use-auction-store.js";
+import { useAdvisor } from "../use-advisor.js";
 import {
   AdviceDetail,
   BidGauge,
@@ -63,26 +64,8 @@ export default function AuctionView({
   const rulesSignature = JSON.stringify(activeRules);
   const defaultUserTeamIndex = configuredUserTeamIndex(activeRules);
 
-  const loadAuction = () => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
-      const legacy =
-        !saved && activeProfileId === "default"
-          ? JSON.parse(localStorage.getItem("fanta-auction-v1") || "null")
-          : null;
-      return (
-        rehydrateAuction(saved || legacy, data.players, activeRules) ||
-        emptyAuction(activeRules)
-      );
-    } catch {
-      return emptyAuction(activeRules);
-    }
-  };
-
-  const [state, setState] = useState(loadAuction);
-  const [userTeamIndex, setUserTeamIndex] = useState(() =>
-    readUserTeamIndex(activeProfileId, activeRules),
-  );
+  const board = useAuctionBoard(activeProfileId, data.players, activeRules);
+  const userTeamIndex = board.userTeamIndex;
   const { query, price } = draft;
   const setQuery = (value) =>
     setDraft((current) => ({ ...current, query: value }));
@@ -95,13 +78,9 @@ export default function AuctionView({
       playerId: candidate ? candidate.id : null,
     }));
   const [owner, setOwner] = useState(userTeamIndex);
-  const [advice, setAdvice] = useState(null);
-  const [overview, setOverview] = useState(null);
   const [message, setMessage] = useState(null);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [showSetup, setShowSetup] = useState(false);
-  const worker = useRef();
-  const skipPersist = useRef(false);
   const priceTouched = useRef(false);
   const resetSignature = `${storageKey}|${rulesSignature}|${defaultUserTeamIndex}`;
   const lastResetSignature = useRef(resetSignature);
@@ -110,19 +89,9 @@ export default function AuctionView({
     index: defaultUserTeamIndex,
   });
 
-  const workerHistory = state.history.flatMap((transaction) => {
-    const transactionPlayer = data.players.find(
-      (candidate) =>
-        playerIdKey(candidate.id) === playerIdKey(transaction.playerId),
-    );
-    return transactionPlayer
-      ? [{ ...transaction, player: transactionPlayer }]
-      : [];
-  });
-
+  /* A profile or a rules change starts a different auction: the team chosen in
+     the settings wins over the one stored for the previous configuration. */
   useEffect(() => {
-    skipPersist.current = true;
-    setState(loadAuction());
     const configuredChanged =
       lastConfiguredUserTeam.current.key === storageKey &&
       lastConfiguredUserTeam.current.index !== defaultUserTeamIndex;
@@ -130,85 +99,38 @@ export default function AuctionView({
       key: storageKey,
       index: defaultUserTeamIndex,
     };
-    if (configuredChanged)
-      writeUserTeamIndex(activeProfileId, defaultUserTeamIndex);
-    const nextUserTeam = configuredChanged
-      ? defaultUserTeamIndex
-      : readUserTeamIndex(activeProfileId, activeRules);
-    setUserTeamIndex(nextUserTeam);
-    setOwner(nextUserTeam);
+    if (configuredChanged) writeUserTeamIndex(activeProfileId, defaultUserTeamIndex);
+    setOwner(configuredChanged ? defaultUserTeamIndex : userTeamIndex);
     if (lastResetSignature.current !== resetSignature) {
       setPlayer(null);
       setQuery("");
       setPrice("");
+      setMessage(null);
     }
     lastResetSignature.current = resetSignature;
   }, [storageKey, rulesSignature, defaultUserTeamIndex]);
 
-  useEffect(() => {
-    if (skipPersist.current) {
-      skipPersist.current = false;
-      return;
-    }
-    localStorage.setItem(storageKey, JSON.stringify(serializeAuction(state)));
-    notifyAuctionChanged();
-  }, [state, storageKey]);
+  useEffect(() => setOwner(userTeamIndex), [userTeamIndex]);
 
-  useEffect(() => {
-    worker.current = new Worker(
-      new URL("../simulation.worker.js", import.meta.url),
-      { type: "module" },
-    );
-    worker.current.onmessage = (event) =>
-      event.data.kind === "overview"
-        ? setOverview(event.data)
-        : setAdvice(event.data);
-    return () => worker.current.terminate();
-  }, []);
+  const { advice, squadPlan: overview } = useAdvisor({
+    player,
+    board,
+    players: data.players,
+    rules: activeRules,
+    overview: true,
+  });
 
-  useEffect(() => {
-    if (!player) return setAdvice(null);
-    worker.current.postMessage({
-      player,
-      owner: userTeamIndex,
-      mine: state.teams[userTeamIndex],
-      teams: state.teams,
-      remaining: data.players.filter(
-        (candidate) => !state.assigned[playerIdKey(candidate.id)],
-      ),
-      assigned: state.assigned,
-      history: workerHistory,
-      rules: activeRules,
-    });
-  }, [player, state, data, rulesSignature, userTeamIndex]);
-
-  useEffect(() => {
-    worker.current.postMessage({
-      mode: "overview",
-      owner: userTeamIndex,
-      mine: state.teams[userTeamIndex],
-      teams: state.teams,
-      remaining: data.players.filter(
-        (candidate) => !state.assigned[playerIdKey(candidate.id)],
-      ),
-      assigned: state.assigned,
-      history: workerHistory,
-      rules: activeRules,
-    });
-  }, [state, data, rulesSignature, userTeamIndex]);
-
-  const activeRole = activeNominationRole(state.teams, activeRules);
-  const myTeam = state.teams[userTeamIndex];
+  const activeRole = board.activeRole;
+  const myTeam = board.teams[userTeamIndex];
   const mySlots = slotsLeft(myTeam, activeRules);
   const myMax = legalMaxBid(myTeam, activeRules);
-  const ownerTeam = state.teams[owner];
+  const ownerTeam = board.teams[owner];
   const selectedLegalMax = legalMaxBid(ownerTeam, activeRules);
   const totalSlots = Object.values(activeRules.rosterSlots).reduce(
     (sum, count) => sum + count,
     0,
   );
-  const canSetStartingCredits =
-    state.history.length === 0 && !state.undone?.length;
+  const canSetStartingCredits = !board.history.length && !board.undone.length;
 
   const choices = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -216,12 +138,12 @@ export default function AuctionView({
     return data.players
       .filter(
         (candidate) =>
-          !state.assigned[playerIdKey(candidate.id)] &&
+          !board.assigned[playerIdKey(candidate.id)] &&
           (!activeRole || candidate.ruolo === activeRole) &&
           candidate.nome.toLowerCase().includes(needle),
       )
       .slice(0, 8);
-  }, [data.players, state.assigned, activeRole, query]);
+  }, [data.players, board.assigned, activeRole, query]);
 
   /* The price box opens on the estimated market price so the common case needs
      no typing; the moment the user edits it we stop overwriting their number. */
@@ -239,6 +161,14 @@ export default function AuctionView({
   }, [player, advice, selectedLegalMax, rulesSignature]);
 
   const say = (text, tone = "info") => setMessage({ text, tone });
+
+  /** Every store answer reaches the user: a refused write is not a silent one. */
+  const report = (result, tone = "go") => {
+    if (result.message) say(result.message, result.ok ? tone : "stop");
+    else if (!result.ok) say("Operazione non riuscita.", "stop");
+    else setMessage(null);
+    return result.ok;
+  };
 
   const resetSelection = () => {
     setPlayer(null);
@@ -265,160 +195,20 @@ export default function AuctionView({
   };
 
   const assign = () => {
-    const value = Number(price);
-    const team = state.teams[owner];
     if (!player) return;
-    if (state.assigned[playerIdKey(player.id)]) {
-      say(`${player.nome} risulta già assegnato.`, "stop");
-      return;
-    }
-    if (activeRole && player.ruolo !== activeRole) {
-      say(
-        `In questa fase puoi assegnare solo ${ROLE_LABELS[activeRole].toLowerCase()}.`,
-        "stop",
-      );
-      return;
-    }
-    if (!Number.isInteger(value) || value < activeRules.auction.minPrice) {
-      say(
-        `Inserisci un prezzo intero di almeno ${activeRules.auction.minPrice} crediti.`,
-        "stop",
-      );
-      return;
-    }
-    if (
-      (value - activeRules.auction.minPrice) %
-      activeRules.auction.increment
-    ) {
-      say(
-        `Il prezzo deve salire di ${activeRules.auction.increment} crediti a partire da ${activeRules.auction.minPrice}.`,
-        "stop",
-      );
-      return;
-    }
-    const legalMax = legalMaxBid(team, activeRules);
-    if (value > legalMax) {
-      const reserve =
-        Math.max(
-          0,
-          Object.values(slotsLeft(team, activeRules)).reduce(
-            (sum, count) => sum + count,
-            0,
-          ) - 1,
-        ) * activeRules.auction.reserve;
-      say(
-        `${team.name} può spendere al massimo ${legalMax} crediti: deve conservarne ${reserve} per completare la rosa.`,
-        "stop",
-      );
-      return;
-    }
-    if (slotsLeft(team, activeRules)[player.ruolo] < 1) {
-      say(
-        `${team.name} non ha più posti per ${(ROLE_LABELS[player.ruolo] || player.ruolo).toLowerCase()}.`,
-        "stop",
-      );
-      return;
-    }
-    setState((current) => ({
-      ...current,
-      teams: current.teams.map((team_, index) =>
-        index === owner
-          ? {
-              ...team_,
-              credits: team_.credits - value,
-              roster: [...team_.roster, player],
-            }
-          : team_,
-      ),
-      assigned: {
-        ...current.assigned,
-        [playerIdKey(player.id)]: { owner, price: value },
-      },
-      history: [
-        ...current.history,
-        { playerId: player.id, owner, price: value },
-      ],
-      undone: [],
-    }));
-    say(`${player.nome} a ${team.name} per ${value} crediti.`, "go");
-    resetSelection();
-  };
-
-  const undo = () => {
-    const last = state.history.at(-1);
-    if (!last) return;
-    setState((current) => {
-      const assigned = { ...current.assigned };
-      delete assigned[playerIdKey(last.playerId)];
-      return {
-        ...current,
-        assigned,
-        history: current.history.slice(0, -1),
-        undone: [...(current.undone || []), last],
-        teams: current.teams.map((team, index) =>
-          index === last.owner
-            ? {
-                ...team,
-                credits: team.credits + last.price,
-                roster: team.roster.filter(
-                  (item) => playerIdKey(item.id) !== playerIdKey(last.playerId),
-                ),
-              }
-            : team,
-        ),
-      };
+    const result = assignPlayer(activeProfileId, data.players, activeRules, {
+      playerId: player.id,
+      owner,
+      price: Number(price),
     });
-    say(
-      `Annullata l'assegnazione di ${
-        data.players.find(
-          (item) => playerIdKey(item.id) === playerIdKey(last.playerId),
-        )?.nome || "giocatore"
-      }.`,
-    );
+    if (report(result)) resetSelection();
   };
 
-  const redo = () => {
-    const last = state.undone?.at(-1);
-    if (!last) return;
-    const team = state.teams[last.owner];
-    const restored = data.players.find(
-      (item) => playerIdKey(item.id) === playerIdKey(last.playerId),
-    );
-    if (
-      !restored ||
-      state.assigned[playerIdKey(last.playerId)] ||
-      slotsLeft(team, activeRules)[restored.ruolo] < 1 ||
-      !isValidBid(last.price, team, activeRules)
-    ) {
-      say(
-        "Non posso ripristinare l'operazione: budget o slot sono cambiati.",
-        "stop",
-      );
-      return;
-    }
-    setState((current) => ({
-      ...current,
-      teams: current.teams.map((team_, index) =>
-        index === last.owner
-          ? {
-              ...team_,
-              credits: team_.credits - last.price,
-              roster: [...team_.roster, restored],
-            }
-          : team_,
-      ),
-      assigned: {
-        ...current.assigned,
-        [playerIdKey(last.playerId)]: {
-          owner: last.owner,
-          price: last.price,
-        },
-      },
-      history: [...current.history, last],
-      undone: current.undone.slice(0, -1),
-    }));
-    say(`Ripristinata l'assegnazione di ${restored.nome}.`, "go");
-  };
+  const undo = () =>
+    report(undoAssignment(activeProfileId, data.players, activeRules), "info");
+
+  const redo = () =>
+    report(redoAssignment(activeProfileId, data.players, activeRules));
 
   const flushAuction = () => {
     if (
@@ -427,25 +217,35 @@ export default function AuctionView({
       )
     )
       return;
-    setState(emptyAuction(activeRules));
-    resetSelection();
-    say("Asta azzerata. Puoi reimpostare i crediti iniziali.", "go");
+    if (report(resetAuction(activeProfileId, data.players, activeRules)))
+      resetSelection();
   };
 
   const updateStartingCredits = (teamIndex, value) => {
     const credits = Number(value);
     if (!Number.isInteger(credits) || credits < 25) return;
-    setState((current) => ({
-      ...current,
-      teams: current.teams.map((team, index) =>
-        index === teamIndex
-          ? { ...team, startingCredits: credits, credits }
-          : team,
+    report(
+      setStartingCredits(
+        activeProfileId,
+        data.players,
+        activeRules,
+        teamIndex,
+        credits,
       ),
-    }));
+    );
   };
 
-  const lastTransaction = state.history.at(-1);
+  const updateTeamName = (teamIndex, name) =>
+    report(
+      renameTeam(activeProfileId, data.players, activeRules, teamIndex, name),
+    );
+
+  const chooseUserTeam = (index) => {
+    setOwner(index);
+    report(writeUserTeamIndex(activeProfileId, index));
+  };
+
+  const lastTransaction = board.history.at(-1);
   const lastPlayer = lastTransaction
     ? data.players.find(
         (item) =>
@@ -470,14 +270,9 @@ export default function AuctionView({
             max={myMax}
             rosterSize={myTeam.roster.length}
             totalSlots={totalSlots}
-            teams={state.teams}
+            teams={board.teams}
             userTeamIndex={userTeamIndex}
-            onChangeUserTeam={(index) => {
-              setUserTeamIndex(index);
-              setOwner(index);
-              writeUserTeamIndex(activeProfileId, index);
-              notifyAuctionChanged();
-            }}
+            onChangeUserTeam={chooseUserTeam}
           />
 
           <div className="nominate">
@@ -495,10 +290,8 @@ export default function AuctionView({
                 value={query}
                 onChange={(event) => {
                   const nextQuery = event.target.value;
-                  if (player && nextQuery !== player.nome) {
-                    setAdvice(null);
+                  if (player && nextQuery !== player.nome)
                     priceTouched.current = false;
-                  }
                   setDraft((current) =>
                     draftForQuery(current, data.players, nextQuery),
                   );
@@ -564,7 +357,7 @@ export default function AuctionView({
               price={price}
               rules={activeRules}
               legalMax={selectedLegalMax}
-              teams={state.teams}
+              teams={board.teams}
               owner={owner}
               userTeamIndex={userTeamIndex}
               onOwner={setOwner}
@@ -589,7 +382,7 @@ export default function AuctionView({
             {lastPlayer ? (
               <span>
                 Ultima: <b>{lastPlayer.nome}</b> a{" "}
-                {state.teams[lastTransaction.owner]?.name} per{" "}
+                {board.teams[lastTransaction.owner]?.name} per{" "}
                 {lastTransaction.price}
               </span>
             ) : (
@@ -599,7 +392,7 @@ export default function AuctionView({
               type="button"
               className="btn btn--sm"
               onClick={undo}
-              disabled={!state.history.length}
+              disabled={!board.history.length}
             >
               Annulla
             </button>
@@ -607,7 +400,7 @@ export default function AuctionView({
               type="button"
               className="btn btn--sm"
               onClick={redo}
-              disabled={!state.undone?.length}
+              disabled={!board.undone.length}
             >
               Ripristina
             </button>
@@ -630,24 +423,17 @@ export default function AuctionView({
               </button>
             </div>
             <div className="teams-board">
-              {state.teams.map((team, index) => (
+              {board.teams.map((team, index) => (
                 <TeamCard
                   key={index}
                   team={team}
                   index={index}
                   rules={activeRules}
                   isMine={index === userTeamIndex}
-                  assigned={state.assigned}
+                  assigned={board.assigned}
                   showSetup={showSetup}
                   canSetStartingCredits={canSetStartingCredits}
-                  onRename={(name) =>
-                    setState((current) => ({
-                      ...current,
-                      teams: current.teams.map((team_, teamIndex) =>
-                        teamIndex === index ? { ...team_, name } : team_,
-                      ),
-                    }))
-                  }
+                  onRename={(name) => updateTeamName(index, name)}
                   onCredits={(value) => updateStartingCredits(index, value)}
                   onOpenPlayer={openPlayer}
                 />
