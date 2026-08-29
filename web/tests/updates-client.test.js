@@ -4,8 +4,11 @@ import {
   acceptSosFanta,
   applyPlayerList,
   checkSosFanta,
+  checkSosFantaSetPieces,
   fantacalcioDownloadUrl,
   sosFantaGuideUrl,
+  sosFantaPenaltyUrl,
+  sosFantaSetPieceUrl,
   updateStateLabel,
   uploadPlayerListCandidate,
 } from "../src/updates-client.js";
@@ -13,6 +16,22 @@ import {
 test("builds the SOS Fanta guide URL from the selected season", () => {
   assert.match(sosFantaGuideUrl("2026/27"), /2026-2027-tutti-consigli/);
   assert.equal(sosFantaGuideUrl("invalid"), "");
+});
+
+test("builds the SOS Fanta set-piece URL and endpoint", async () => {
+  assert.equal(
+    sosFantaSetPieceUrl("2026/27"),
+    "https://www.sosfanta.com/asta-fantacalcio/serie-a-2026-2027-tiratori-punizioni-corner-specialisti-fantacalcio-asta/",
+  );
+  assert.equal(sosFantaSetPieceUrl("2026/28"), "");
+  assert.match(sosFantaPenaltyUrl(), /rigoristi-seriea-venti-squadre-campionato/);
+  let requestUrl;
+  const fetchImpl = async (url) => {
+    requestUrl = url;
+    return { ok: true, status: 200, json: async () => ({ state: "unchanged" }) };
+  };
+  await checkSosFantaSetPieces({ profile_id: "league" }, { fetchImpl });
+  assert.equal(requestUrl, "/api/updates/sosfanta-set-pieces/check");
 });
 
 test("maps profile seasons to official Fantacalcio downloads", () => {

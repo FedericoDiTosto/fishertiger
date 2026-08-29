@@ -1,15 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import {
   acceptSosFanta,
+  acceptSosFantaSetPieces,
   applyPlayerList,
   checkPlayerList,
   checkSosFanta,
   fantacalcioDownloadUrl,
   fetchSosFantaBundle,
+  fetchSosFantaSetPieceBundle,
   getPlayerListStatus,
   getSosFantaStatus,
+  getSosFantaSetPieceStatus,
   playerListStateLabel,
   sosFantaGuideUrl,
+  sosFantaPenaltyUrl,
+  sosFantaSetPieceUrl,
+  checkSosFantaSetPieces,
   uploadPlayerListCandidate,
   updateStateLabel,
 } from "./updates-client.js";
@@ -124,7 +130,7 @@ function PlayerListUpdates({ profile, apiBase, onApplied }) {
   return (
     <article className="update-source-card player-list-card">
       <header>
-        <div><span className="source-index">02</span><h2>Listone Fantacalcio</h2></div>
+        <div><span className="source-index">03</span><h2>Listone Fantacalcio</h2></div>
         <span className={`update-state ${candidate?.state || remote?.state || "idle"}`}>
           {candidate?.state && candidate.state !== "never_uploaded" ? playerListStateLabel(candidate.state) : playerListStateLabel(remote?.state)}
         </span>
@@ -214,6 +220,133 @@ function PlayerListUpdates({ profile, apiBase, onApplied }) {
           {candidate.details?.truncated && (
             <p className="update-truncated" role="alert">Il diff supera il limite visualizzabile. Non applicare il file senza una revisione esterna completa.</p>
           )}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function SetPieceUpdates({ profile, apiBase }) {
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  const [problem, setProblem] = useState("");
+  const sequence = useRef(0);
+  const season = profile?.season?.season;
+  const sourceUrls = result?.source_urls || [sosFantaSetPieceUrl(season), sosFantaPenaltyUrl()];
+
+  useEffect(() => {
+    let active = true;
+    const request = ++sequence.current;
+    setResult(null);
+    setBusy("");
+    setMessage("");
+    setProblem("");
+    getSosFantaSetPieceStatus(profile, { apiBase })
+      .then((next) => {
+        if (active && request === sequence.current) setResult(next);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [apiBase, profile?.profile_id, season]);
+
+  const run = async (action) => {
+    const request = ++sequence.current;
+    setBusy(action);
+    setMessage("");
+    setProblem("");
+    try {
+      if (action === "check") {
+        const next = await checkSosFantaSetPieces(profile, { apiBase });
+        if (request !== sequence.current) return;
+        setResult(next);
+        setMessage(next.state === "changed" ? `${next.change_count} squadre modificate.` : "Verifica completata.");
+      } else {
+        const next = await acceptSosFantaSetPieces(profile, { apiBase, contentHash: result?.content_hash });
+        if (request !== sequence.current) return;
+        setResult((current) => ({ ...current, ...next, changes: [], change_count: 0 }));
+        setMessage("La versione verificata è stata salvata come riferimento.");
+      }
+    } catch (error) {
+      if (request !== sequence.current) return;
+      setProblem(error?.code || "request_failed");
+      setMessage(error instanceof Error ? error.message : "Operazione non completata.");
+    } finally {
+      if (request === sequence.current) setBusy("");
+    }
+  };
+
+  const downloadBundle = async () => {
+    const request = ++sequence.current;
+    setBusy("bundle");
+    setMessage("");
+    setProblem("");
+    try {
+      const response = await fetchSosFantaSetPieceBundle(profile, { apiBase, contentHash: result?.content_hash });
+      const blob = await response.blob();
+      if (request !== sequence.current) return;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `sosfanta-piazzati-update-${season.replace("/", "-")}.txt`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setMessage("Bundle AI per piazzati.csv scaricato.");
+    } catch (error) {
+      if (request !== sequence.current) return;
+      setProblem(error?.code || "request_failed");
+      setMessage(error instanceof Error ? error.message : "Download non completato.");
+    } finally {
+      if (request === sequence.current) setBusy("");
+    }
+  };
+
+  const hierarchy = (specialties) => Object.entries(specialties || {})
+    .map(([type, players]) => `${type}: ${players.join(", ")}`).join("\n");
+
+  return (
+    <article className="update-source-card">
+      <header>
+        <div><span className="source-index">02</span><h2>SOS Fanta Piazzati</h2></div>
+        <span className={`update-state ${result?.state || "idle"}`}>{updateStateLabel(result?.state)}</span>
+      </header>
+      <div className="update-source-meta">
+        <div><span>Stagione</span><strong>{season}</strong></div>
+        <div><span>Ambito</span><strong>Rigori, punizioni e corner</strong></div>
+        <div><span>Ultimo controllo</span><strong>{result?.checked_at?.slice(0, 16).replace("T", " ") || "Mai"}</strong></div>
+      </div>
+      {sourceUrls.map((sourceUrl) => (
+        <a className="source-url" href={sourceUrl} target="_blank" rel="noreferrer" key={sourceUrl}>{sourceUrl}</a>
+      ))}
+      <div className="update-actions">
+        <button className="update-check-button" onClick={() => run("check")} disabled={Boolean(busy)}>
+          {busy === "check" ? "Controllo in corso..." : "Controlla gerarchie"}
+        </button>
+        {result?.state === "changed" && (
+          <button onClick={downloadBundle} disabled={Boolean(busy)}>
+            {busy === "bundle" ? "Preparazione..." : "Scarica bundle AI"}
+          </button>
+        )}
+        {(result?.state === "baseline_missing" || result?.state === "changed") && (
+          <button className="quiet" onClick={() => run("accept")} disabled={Boolean(busy)}>
+            {result.state === "baseline_missing" ? "Salva riferimento iniziale" : "Segna come acquisito"}
+          </button>
+        )}
+      </div>
+      <p className="accept-warning">Il controllo combina le gerarchie della pagina rigoristi con quelle di punizioni e corner. Segna come acquisito solo dopo aver revisionato <code>piazzati.csv</code>.</p>
+      {message && <p className={`update-message ${problem ? "error" : ""}`} role={problem ? "alert" : "status"}>{message}</p>}
+      {result?.changes?.length > 0 && (
+        <div className="update-diff">
+          <div className="diff-title"><span>DIFF GERARCHIE</span><strong>{result.change_count} squadre</strong></div>
+          {result.changes.map((change) => (
+            <details key={change.team}>
+              <summary><span>{change.team}</span><b>{change.change}</b></summary>
+              <div className="diff-columns">
+                <div><small>PRIMA</small><p>{hierarchy(change.old_specialties) || "-"}{change.old_text.length ? `\n\n${change.old_text.join("\n\n")}` : ""}</p></div>
+                <div><small>DOPO</small><p>{hierarchy(change.new_specialties) || "-"}{change.new_text.length ? `\n\n${change.new_text.join("\n\n")}` : ""}</p></div>
+              </div>
+            </details>
+          ))}
         </div>
       )}
     </article>
@@ -314,7 +447,7 @@ export function Updates({ profile, apiBase = "", onPlayerListApplied }) {
           <li><b>Verifica</b><span>Esamina il diff semantico o il file XLSX ufficiale.</span></li>
           <li><b>Applica</b><span>Conferma esplicitamente prima di aggiornare e rigenerare.</span></li>
         </ol>
-        <p>Questa funzione rileva e prepara gli aggiornamenti. Non modifica automaticamente <code>titolari.csv</code>.</p>
+        <p>Questa funzione rileva e prepara gli aggiornamenti. Non modifica automaticamente <code>titolari.csv</code> o <code>piazzati.csv</code>.</p>
       </div>
 
       <article className="update-source-card">
@@ -380,11 +513,13 @@ export function Updates({ profile, apiBase = "", onPlayerListApplied }) {
         )}
       </article>
 
+      <SetPieceUpdates profile={profile} apiBase={apiBase} />
+
       <PlayerListUpdates profile={profile} apiBase={apiBase} onApplied={onPlayerListApplied} />
 
       <aside className="update-method-note">
         <strong>Metodo</strong>
-        <p>Il controllo confronta solo testo e fasce della guida. Menu, pubblicità e notizie correlate vengono escluse dall'hash. Nessuna riga CSV viene modificata da questa schermata.</p>
+        <p>I controlli confrontano solo i contenuti editoriali rilevanti. Menu, pubblicità e notizie correlate vengono escluse dagli hash. Nessuna riga CSV viene modificata da questa schermata.</p>
       </aside>
     </section>
   );

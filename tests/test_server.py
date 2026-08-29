@@ -46,6 +46,12 @@ class LocalApiServerTests(unittest.TestCase):
 
         self.player_list_html = ""
 
+        def set_piece_fetcher(url):
+            return self.penalty_html if "rigoristi" in url else self.set_piece_html
+
+        self.set_piece_html = ""
+        self.penalty_html = ""
+
         self.server = create_server(
             ("127.0.0.1", 0),
             profiles_dir=root / "config/profiles",
@@ -55,6 +61,7 @@ class LocalApiServerTests(unittest.TestCase):
             generator=generator,
             simulator=simulator,
             update_fetcher=update_fetcher,
+            set_piece_fetcher=set_piece_fetcher,
             player_list_fetcher=player_list_fetcher,
         )
         self.thread = threading.Thread(target=self.server.serve_forever)
@@ -90,6 +97,32 @@ class LocalApiServerTests(unittest.TestCase):
             pd.DataFrame([["Quotazioni Fantacalcio Stagione 2026 27"]]).to_excel(writer, sheet_name="Ceduti", index=False, header=False)
             pd.DataFrame({"Id": list(ceduti)}).to_excel(writer, sheet_name="Ceduti", index=False, startrow=1)
         return output.getvalue()
+
+    def set_piece_article(self, first="Alpha, Beta"):
+        teams = [
+            "ATALANTA", "BOLOGNA", "CAGLIARI", "COMO", "FIORENTINA", "FROSINONE", "GENOA",
+            "INTER", "JUVENTUS", "LAZIO", "LECCE", "MILAN", "MONZA", "NAPOLI", "PARMA",
+            "ROMA", "SASSUOLO", "TORINO", "UDINESE", "VENEZIA",
+        ]
+        sections = "".join(
+            f"<p>✅ <strong>{team}</strong></p><p><em>Punizioni</em>: {first if index == 0 else f'Free {index}, Reserve {index}'}</p>"
+            f"<p><em>Corner</em>: Corner {index}, Wide {index}</p><p>Evidence {index}.</p>"
+            for index, team in enumerate(teams)
+        )
+        return f'<h1>Tiratori 2026/27</h1><div id="article-content">{sections}</div>'
+
+    def penalty_article(self, first="Penalty", reserve="Reserve"):
+        teams = [
+            "ATALANTA", "BOLOGNA", "CAGLIARI", "COMO", "FIORENTINA", "FROSINONE", "GENOA",
+            "INTER", "JUVENTUS", "LAZIO", "LECCE", "MILAN", "MONZA", "NAPOLI", "PARMA",
+            "ROMA", "SASSUOLO", "TORINO", "UDINESE", "VENEZIA",
+        ]
+        sections = "".join(
+            f"<p>🎯 <strong>{team}</strong></p><p><em>Primo</em>: <strong>{first if index == 0 else 'Penalty Player'}</strong>.</p>"
+            f"<p><em>Note</em>: <strong>{reserve if index == 0 else 'Reserve Player'}</strong>.</p>"
+            for index, team in enumerate(teams)
+        )
+        return f'<h1>Tutti i rigoristi 2026/27</h1><div id="article-content">{sections}</div>'
 
     def test_profiles_round_trip_and_index(self):
         expected = json.loads(json.dumps(profile_response(LeagueProfile.from_dict(self.profile))))
@@ -366,6 +399,41 @@ class LocalApiServerTests(unittest.TestCase):
         response, payload = self.request("POST", "/api/updates/sosfanta/status", body, headers)
         self.assertEqual(response.status, 200)
         self.assertEqual(payload["state"], "changed")
+
+    def test_sosfanta_set_piece_check_accept_and_bundle_flow(self):
+        root = Path(self.temp_dir.name)
+        set_pieces = root / "piazzati.csv"
+        set_pieces.write_text(
+            "squadra,nome,tipo,priorita\nAtalanta,Penalty,RIGORI,1\nAtalanta,Alpha,PUNIZIONI,1\n",
+            encoding="utf-8",
+        )
+        next(item for item in self.profile["current_sources"] if item["name"] == "set_pieces")["path"] = str(set_pieces)
+        self.set_piece_html = self.set_piece_article()
+        self.penalty_html = self.penalty_article()
+        body = json.dumps({"profile": self.profile}).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+
+        response, first = self.request("POST", "/api/updates/sosfanta-set-pieces/check", body, headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(first["state"], "baseline_missing")
+        reviewed = json.dumps({"profile": self.profile, "content_hash": first["content_hash"]}).encode("utf-8")
+        response, _ = self.request("POST", "/api/updates/sosfanta-set-pieces/accept", reviewed, headers)
+        self.assertEqual(response.status, 200)
+
+        self.set_piece_html = self.set_piece_article("Beta, Alpha")
+        self.penalty_html = self.penalty_article("Reserve", "Penalty")
+        response, changed = self.request("POST", "/api/updates/sosfanta-set-pieces/check", body, headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(changed["change_count"], 1)
+        reviewed = json.dumps({"profile": self.profile, "content_hash": changed["content_hash"]}).encode("utf-8")
+        response, payload = self.request("POST", "/api/updates/sosfanta-set-pieces/bundle", reviewed, headers)
+        self.assertEqual(response.status, 200)
+        self.assertIn("current_piazzati_csv", payload)
+        self.assertIn("A RIGORI operation must be supported", payload)
+
+        response, status = self.request("POST", "/api/updates/sosfanta-set-pieces/status", body, headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(status["state"], "changed")
 
     def test_upload_rejects_unsafe_paths_and_file_types(self):
         response, payload = self.request(

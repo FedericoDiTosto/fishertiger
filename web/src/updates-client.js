@@ -16,6 +16,18 @@ export const sosFantaGuideUrl = (season) => {
   return `https://www.sosfanta.com/guida-asta-fantacalcio/guida-asta-fantacalcio-${match[1]}-${end}-tutti-consigli-fasce-chi-prendere/`;
 };
 
+export const sosFantaSetPieceUrl = (season) => {
+  const match = String(season || "").trim().match(/^(\d{4})\/(\d{2}|\d{4})$/);
+  if (!match) return "";
+  const start = Number(match[1]);
+  const end = Number(match[2].length === 2 ? `${match[1].slice(0, 2)}${match[2]}` : match[2]);
+  if (end !== start + 1) return "";
+  return `https://www.sosfanta.com/asta-fantacalcio/serie-a-${start}-${end}-tiratori-punizioni-corner-specialisti-fantacalcio-asta/`;
+};
+
+export const sosFantaPenaltyUrl = () =>
+  "https://www.sosfanta.com/asta-fantacalcio/fantacalcio-asta-tutti-rigoristi-seriea-venti-squadre-campionato/";
+
 const updateRequest = async (provider, action, profile, {
   apiBase = "", fetchImpl = globalThis.fetch, contentHash = "", candidateHash = "",
   profileHash = "", activeHash = "",
@@ -63,6 +75,10 @@ export const checkSosFanta = (profile, options) => updateRequest("sosfanta", "ch
 export const getSosFantaStatus = (profile, options) => updateRequest("sosfanta", "status", profile, options);
 export const acceptSosFanta = (profile, options) => updateRequest("sosfanta", "accept", profile, options);
 export const fetchSosFantaBundle = (profile, options) => updateRequest("sosfanta", "bundle", profile, options);
+export const checkSosFantaSetPieces = (profile, options) => updateRequest("sosfanta-set-pieces", "check", profile, options);
+export const getSosFantaSetPieceStatus = (profile, options) => updateRequest("sosfanta-set-pieces", "status", profile, options);
+export const acceptSosFantaSetPieces = (profile, options) => updateRequest("sosfanta-set-pieces", "accept", profile, options);
+export const fetchSosFantaSetPieceBundle = (profile, options) => updateRequest("sosfanta-set-pieces", "bundle", profile, options);
 
 const seasonParts = (season) => {
   const match = String(season || "").trim().match(/^(\d{4})\/(\d{2}|\d{4})$/);
