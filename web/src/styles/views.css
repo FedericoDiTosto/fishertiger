@@ -396,6 +396,22 @@
     var(--c-surface);
 }
 
+.availability-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-4);
+  color: var(--c-text-mute);
+  font-size: var(--fs-xs);
+}
+
+.availability-legend > span {
+  white-space: nowrap;
+}
+
+.availability-legend .avail {
+  margin-right: 6px;
+}
+
 .club-hero h2 {
   font-size: var(--fs-2xl);
 }

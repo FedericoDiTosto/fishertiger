@@ -41,6 +41,11 @@ export default function TeamsView({
       <div className="page-head">
         <span className="kicker">Serie A</span>
         <h1>Rose, calendario e piazzati</h1>
+        <div className="availability-legend" aria-label="Legenda disponibilità giocatori">
+          <span><i className="avail avail--good" aria-hidden="true" />Titolare</span>
+          <span><i className="avail avail--caution" aria-hidden="true" />Ballottaggio</span>
+          <span><i className="avail avail--muted" aria-hidden="true" />Riserva</span>
+        </div>
       </div>
 
       <div className="chip-rail">

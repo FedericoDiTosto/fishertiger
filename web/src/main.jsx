@@ -50,6 +50,13 @@ const TABS = [
   { id: "settings", label: "Impostazioni", icon: "sliders", views: [["settings", "Impostazioni"]] },
 ];
 
+const MOBILE_PRIMARY_IDS = new Set([
+  "sintesi",
+  "listone",
+  "asta",
+  "squadre",
+]);
+
 const tabOf = (view) =>
   TABS.find((tab) => tab.views.some(([id]) => id === view)) || TABS[0];
 
@@ -94,6 +101,7 @@ function App() {
   const [selectedTeam, setSelectedTeam] = useState(null);
   const [listRole, setListRole] = useState(null);
   const [statusOpen, setStatusOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [viewHistory, setViewHistory] = useState([
     { view: "overview", player: null, team: null },
   ]);
@@ -623,6 +631,7 @@ function App() {
   const simulationState = simulationFreshness(profile, data, season);
   const datasetStale = datasetState !== "dataset corrente";
   const tab = tabOf(view);
+  const moreActive = !MOBILE_PRIMARY_IDS.has(tab.id);
 
   return (
     <>
@@ -754,7 +763,7 @@ function App() {
         {TABS.map((item) => (
           <button
             key={item.id}
-            className={`tab${item.hero ? " tab--hero" : ""}${item.id === tab.id ? " is-active" : ""}`}
+            className={`tab${item.hero ? " tab--hero" : ""}${!MOBILE_PRIMARY_IDS.has(item.id) ? " tab--secondary" : ""}${item.id === tab.id ? " is-active" : ""}`}
             onClick={() => navigate(item.views[0][0])}
             aria-current={item.id === tab.id ? "page" : undefined}
           >
@@ -762,6 +771,16 @@ function App() {
             {item.label}
           </button>
         ))}
+        <button
+          type="button"
+          className={`tab tab--more${moreActive ? " is-active" : ""}`}
+          onClick={() => setMoreOpen(true)}
+          aria-current={moreActive ? "page" : undefined}
+          aria-expanded={moreOpen}
+        >
+          <span className="tab-icon"><Icon name="more" /></span>
+          Altro
+        </button>
       </nav>
 
       <Sheet
@@ -789,6 +808,30 @@ function App() {
           >
             {isGenerating ? "Rigenerazione..." : "Rigenera dati"}
           </button>
+        </div>
+      </Sheet>
+
+      <Sheet
+        open={moreOpen}
+        onClose={() => setMoreOpen(false)}
+        title="Altro"
+      >
+        <div className="more-nav-list">
+          {TABS.filter((item) => !MOBILE_PRIMARY_IDS.has(item.id)).map((item) => (
+            <button
+              type="button"
+              className={`more-nav-item${item.id === tab.id ? " is-active" : ""}`}
+              key={item.id}
+              onClick={() => {
+                setMoreOpen(false);
+                navigate(item.views[0][0]);
+              }}
+              aria-current={item.id === tab.id ? "page" : undefined}
+            >
+              <Icon name={item.icon} />
+              {item.label}
+            </button>
+          ))}
         </div>
       </Sheet>
     </>
