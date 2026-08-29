@@ -6,6 +6,7 @@ import { LeagueSettings } from "./league-settings.jsx";
 import { createRequestGate } from "./latest-request.js";
 import { datasetFreshness, simulationFreshness } from "./dataset-freshness.js";
 import { emptyDraft } from "./auction-state.js";
+import { Updates } from "./updates.jsx";
 import {
   apiUrl,
   auctionDatasetPath,
@@ -45,6 +46,7 @@ const TABS = [
     icon: "sliders",
     views: [
       ["simulation", "Simulazione"],
+      ["updates", "Aggiornamenti"],
       ["settings", "Impostazioni"],
     ],
   },
@@ -538,7 +540,6 @@ function App() {
         setIsSimulating(false);
     }
   };
-
   if (!profile)
     return (
       <main className="boot">
@@ -680,6 +681,9 @@ function App() {
               draft={auctionDraft}
               setDraft={setAuctionDraft}
             />
+          ) : null}
+          {view === "updates" ? (
+            <Updates profile={profile} apiBase={apiBase} />
           ) : null}
           {view === "settings" ? (
             <>

@@ -30,13 +30,22 @@ class LocalApiServerTests(unittest.TestCase):
             self.calls.append((profile, output_dir, iterations, seed))
             return {"iterations": iterations, "diagnostics": {"seed": seed}, "teams": {}, "scenarios": {}, "rosters": {}}
 
+        def update_fetcher(url):
+            page = 1 if url.endswith("chi-prendere/") else int(url.rstrip("/").rsplit("/", 1)[1])
+            role = {1: "PORTIERI", 2: "DIFENSORI", 3: "CENTROCAMPISTI", 4: "ATTACCANTI"}[page]
+            return f'<article><h2 class="article-page-subtitle">{role}</h2><p><strong>TOP</strong> - Alpha</p><p>{self.update_prose}</p></article>'
+
+        self.update_prose = "Alpha is the starter."
+
         self.server = create_server(
             ("127.0.0.1", 0),
             profiles_dir=root / "config/profiles",
             datasets_dir=root / "data/processed",
             uploads_dir=root / "data/uploads",
+            updates_dir=root / "data/updates",
             generator=generator,
             simulator=simulator,
+            update_fetcher=update_fetcher,
         )
         self.thread = threading.Thread(target=self.server.serve_forever)
         self.thread.start()
@@ -53,7 +62,13 @@ class LocalApiServerTests(unittest.TestCase):
         response = connection.getresponse()
         payload = response.read()
         connection.close()
-        return response, json.loads(payload) if payload else None
+        if not payload:
+            parsed = None
+        elif response.getheader("Content-Type", "").startswith("application/json"):
+            parsed = json.loads(payload)
+        else:
+            parsed = payload.decode("utf-8")
+        return response, parsed
 
     def test_profiles_round_trip_and_index(self):
         expected = json.loads(json.dumps(profile_response(LeagueProfile.from_dict(self.profile))))
@@ -295,6 +310,41 @@ class LocalApiServerTests(unittest.TestCase):
             source for source in payload["sources"] if source["name"] == "player_list"
         )
         self.assertTrue(player_list["exists"])
+
+    def test_sosfanta_update_check_and_accept_flow(self):
+        body = json.dumps({"profile": self.profile}).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        response, payload = self.request("POST", "/api/updates/sosfanta/check", body, headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["state"], "baseline_missing")
+        first_hash = payload["content_hash"]
+
+        reviewed_body = json.dumps({"profile": self.profile, "content_hash": first_hash}).encode("utf-8")
+        response, payload = self.request("POST", "/api/updates/sosfanta/accept", reviewed_body, headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["state"], "unchanged")
+
+        response, payload = self.request("POST", "/api/updates/sosfanta/check", body, headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["state"], "unchanged")
+
+        self.update_prose = "Beta now challenges Alpha."
+        response, payload = self.request("POST", "/api/updates/sosfanta/check", body, headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["state"], "changed")
+        self.assertEqual(payload["change_count"], 4)
+        changed_hash = payload["content_hash"]
+
+        reviewed_body = json.dumps({"profile": self.profile, "content_hash": changed_hash}).encode("utf-8")
+        response, payload = self.request("POST", "/api/updates/sosfanta/bundle", reviewed_body, headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.getheader("Content-Type"), "text/plain; charset=utf-8")
+        self.assertIn("current_titolari_csv", payload)
+        self.assertIn("Beta now challenges Alpha", payload)
+
+        response, payload = self.request("POST", "/api/updates/sosfanta/status", body, headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["state"], "changed")
 
     def test_upload_rejects_unsafe_paths_and_file_types(self):
         response, payload = self.request(

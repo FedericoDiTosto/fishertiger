@@ -27,13 +27,19 @@ from .generate import (
     resolve_profile,
 )
 from .freshness import dataset_configuration_hash, simulation_configuration_hash
+from .sosfanta_updates import (
+    FetchPage,
+    SosFantaError,
+    accept_latest,
+    build_bundle,
+    check_updates,
+    fetch_page,
+    stored_status,
+)
 
 
 def profile_response(profile: Any) -> dict[str, Any]:
-    """The profile as the browser needs it: stored fields plus the derived hash the
-    dataset carries in its metadata, so the UI can tell a stale dataset from a
-    current one. `from_dict` ignores the extra key on the way back, and `to_dict`
-    stays hash-free so `configuration_hash` cannot hash itself."""
+    """The profile as the browser needs it: stored fields plus derived hashes."""
     return {
         **profile.to_dict(),
         "configuration_hash": profile.configuration_hash,
@@ -78,18 +84,22 @@ class LocalApiServer(ThreadingHTTPServer):
         profiles_dir: Path | str = Path("config/profiles"),
         datasets_dir: Path | str = Path("data/processed"),
         uploads_dir: Path | str = Path("data/uploads"),
+        updates_dir: Path | str = Path("data/updates"),
         default_profile_path: Path | str = Path("config/default_profile.json"),
         generator: PipelineGenerator | None = None,
         simulator: SimulationRunner | None = None,
         profile_loader: ProfileLoader = load_profile,
+        update_fetcher: FetchPage = fetch_page,
     ) -> None:
         self.profiles_dir = Path(profiles_dir)
         self.datasets_dir = Path(datasets_dir)
         self.uploads_dir = Path(uploads_dir)
+        self.updates_dir = Path(updates_dir)
         self.default_profile_path = Path(default_profile_path)
         self.generator = generator
         self.simulator = simulator or _simulate_current_dataset
         self.profile_loader = profile_loader
+        self.update_fetcher = update_fetcher
         super().__init__(address, LocalApiHandler)
 
     def handle_error(self, request: Any, client_address: Any) -> None:
@@ -137,6 +147,18 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.NOT_FOUND, "not_found", "The requested endpoint does not exist.")
 
     def do_POST(self) -> None:
+        if self._path() == "/api/updates/sosfanta/check":
+            self._check_sosfanta_updates()
+            return
+        if self._path() == "/api/updates/sosfanta/status":
+            self._sosfanta_status()
+            return
+        if self._path() == "/api/updates/sosfanta/accept":
+            self._accept_sosfanta_updates()
+            return
+        if self._path() == "/api/updates/sosfanta/bundle":
+            self._sosfanta_bundle()
+            return
         if self._path() == "/api/sources/status":
             self._source_status()
             return
@@ -329,6 +351,96 @@ class LocalApiHandler(BaseHTTPRequestHandler):
                 })
         self._send_json(HTTPStatus.OK, {"sources": statuses})
 
+    def _update_request(self) -> tuple[Any, str, str, str] | None:
+        value = self._read_json_object()
+        if value is None:
+            return None
+        try:
+            profile = resolve_profile(value, self.server.profiles_dir, profile_loader=self.server.profile_loader)
+        except ProfileRequestError as error:
+            self._error(HTTPStatus.BAD_REQUEST, "invalid_profile", str(error))
+            return None
+        content_hash = value.get("content_hash", "")
+        if not isinstance(content_hash, str):
+            self._error(HTTPStatus.BAD_REQUEST, "invalid_snapshot_hash", "The snapshot hash must be a string.")
+            return None
+        return profile, profile.profile_id, profile.season.season, content_hash
+
+    def _check_sosfanta_updates(self) -> None:
+        request = self._update_request()
+        if request is None:
+            return
+        _, profile_id, season, _ = request
+        try:
+            result = check_updates(
+                self.server.updates_dir,
+                profile_id,
+                season,
+                self.server.update_fetcher,
+            )
+        except SosFantaError as error:
+            self._error(HTTPStatus.BAD_GATEWAY, "update_check_failed", str(error))
+            return
+        except OSError:
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "storage_error", "The update snapshot could not be stored.")
+            return
+        self._send_json(HTTPStatus.OK, result)
+
+    def _sosfanta_status(self) -> None:
+        request = self._update_request()
+        if request is None:
+            return
+        _, profile_id, season, _ = request
+        try:
+            result = stored_status(self.server.updates_dir, profile_id, season)
+        except SosFantaError as error:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "snapshot_unavailable", str(error))
+            return
+        self._send_json(HTTPStatus.OK, result)
+
+    def _accept_sosfanta_updates(self) -> None:
+        request = self._update_request()
+        if request is None:
+            return
+        _, profile_id, season, content_hash = request
+        try:
+            result = accept_latest(self.server.updates_dir, profile_id, season, content_hash)
+        except SosFantaError as error:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "snapshot_unavailable", str(error))
+            return
+        except OSError:
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "storage_error", "The update snapshot could not be accepted.")
+            return
+        self._send_json(HTTPStatus.OK, result)
+
+    def _sosfanta_bundle(self) -> None:
+        request = self._update_request()
+        if request is None:
+            return
+        profile, profile_id, season, content_hash = request
+        source = next((item for item in profile.current_sources if item.name == "starters"), None)
+        if source is None:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "source_unavailable", "The profile does not declare a starters source.")
+            return
+        declared = Path(source.path)
+        candidates = [declared] if declared.is_absolute() else [
+            declared,
+            Path.cwd() / declared,
+            Path(__file__).resolve().parents[1] / declared,
+        ]
+        starters_path = next((candidate for candidate in candidates if candidate.is_file()), declared)
+        try:
+            bundle = build_bundle(self.server.updates_dir, profile_id, season, starters_path, content_hash)
+        except SosFantaError as error:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "bundle_unavailable", str(error))
+            return
+        self._send_bytes(
+            HTTPStatus.OK,
+            bundle.encode("utf-8"),
+            "text/plain; charset=utf-8",
+            f'sosfanta-update-{season.replace("/", "-")}.txt',
+        )
+
     def _derive_calendar_participants(self, profile: Any) -> Any:
         """Use the league calendar as the authoritative participant roster when available."""
         source = next((item for item in profile.current_sources if item.name == "league_calendar"), None)
@@ -442,6 +554,9 @@ class LocalApiHandler(BaseHTTPRequestHandler):
 
     def _send_json(self, status: HTTPStatus, value: Any) -> None:
         body = b"" if value is None else json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        self._send_bytes(status, body, "application/json; charset=utf-8")
+
+    def _send_bytes(self, status: HTTPStatus, body: bytes, content_type: str, filename: str | None = None) -> None:
         self.send_response(status)
         origin = self.headers.get("Origin")
         if origin and VITE_ORIGIN.fullmatch(origin):
@@ -449,7 +564,9 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Methods", "GET, PUT, POST, DELETE, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Filename")
-        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Type", content_type)
+        if filename:
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         if body:
@@ -468,13 +585,15 @@ def create_server(
     profiles_dir: Path | str = Path("config/profiles"),
     datasets_dir: Path | str = Path("data/processed"),
     uploads_dir: Path | str = Path("data/uploads"),
+    updates_dir: Path | str = Path("data/updates"),
     default_profile_path: Path | str = Path("config/default_profile.json"),
     generator: PipelineGenerator | None = None,
     simulator: SimulationRunner | None = None,
     profile_loader: ProfileLoader = load_profile,
+    update_fetcher: FetchPage = fetch_page,
 ) -> LocalApiServer:
     """Create a local API server; inject a pipeline generator for tests or embedding."""
-    return LocalApiServer(address, profiles_dir=profiles_dir, datasets_dir=datasets_dir, uploads_dir=uploads_dir, default_profile_path=default_profile_path, generator=generator, simulator=simulator, profile_loader=profile_loader)
+    return LocalApiServer(address, profiles_dir=profiles_dir, datasets_dir=datasets_dir, uploads_dir=uploads_dir, updates_dir=updates_dir, default_profile_path=default_profile_path, generator=generator, simulator=simulator, profile_loader=profile_loader, update_fetcher=update_fetcher)
 
 
 def _simulate_current_dataset(profile: Any, output_dir: Path, iterations: int, seed: int) -> dict[str, Any]:
@@ -492,8 +611,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--profiles-dir", type=Path, default=Path("config/profiles"))
     parser.add_argument("--datasets-dir", type=Path, default=Path("data/processed"))
     parser.add_argument("--uploads-dir", type=Path, default=Path("data/uploads"))
+    parser.add_argument("--updates-dir", type=Path, default=Path("data/updates"))
     args = parser.parse_args(argv)
-    server = create_server((args.host, args.port), profiles_dir=args.profiles_dir, datasets_dir=args.datasets_dir, uploads_dir=args.uploads_dir)
+    server = create_server((args.host, args.port), profiles_dir=args.profiles_dir, datasets_dir=args.datasets_dir, uploads_dir=args.uploads_dir, updates_dir=args.updates_dir)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

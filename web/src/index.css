@@ -9,6 +9,7 @@
 @import "./styles/sheet.css" layer(components);
 @import "./styles/auction.css" layer(components);
 @import "./styles/views.css" layer(components);
+@import "./updates.css" layer(components);
 
 /* Two screens keep their own namespaced stylesheets; both are retimed to the
    shared tokens rather than carrying private palettes. */
