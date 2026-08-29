@@ -23,7 +23,7 @@ def source_fingerprints(profile: Any, raw: Path) -> list[dict[str, Any]]:
     for group in ("current_sources", "history_sources"):
         for source in getattr(profile, group, ()):
             declared = Path(source.path)
-            candidates = [declared] if declared.is_absolute() else [raw / declared, declared, Path.cwd() / declared]
+            candidates = [declared] if declared.is_absolute() else [raw / declared, declared, Path.cwd() / declared, Path(__file__).resolve().parents[1] / declared]
             path = next((candidate for candidate in candidates if candidate.is_file()), None)
             item: dict[str, Any] = {"group": group, "name": source.name, "path": source.path}
             if path is None:

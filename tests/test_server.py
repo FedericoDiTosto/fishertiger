@@ -1,11 +1,15 @@
 import http.client
+import io
 import json
 import tempfile
 import threading
 import unittest
 from pathlib import Path
 
+import pandas as pd
+
 from advisor.league_profile import LeagueProfile
+from advisor.pipeline import LISTONE_COLUMNS
 from advisor.server import create_server, profile_response
 
 
@@ -37,6 +41,11 @@ class LocalApiServerTests(unittest.TestCase):
 
         self.update_prose = "Alpha is the starter."
 
+        def player_list_fetcher(url):
+            return self.player_list_html
+
+        self.player_list_html = ""
+
         self.server = create_server(
             ("127.0.0.1", 0),
             profiles_dir=root / "config/profiles",
@@ -46,6 +55,7 @@ class LocalApiServerTests(unittest.TestCase):
             generator=generator,
             simulator=simulator,
             update_fetcher=update_fetcher,
+            player_list_fetcher=player_list_fetcher,
         )
         self.thread = threading.Thread(target=self.server.serve_forever)
         self.thread.start()
@@ -69,6 +79,17 @@ class LocalApiServerTests(unittest.TestCase):
         else:
             parsed = payload.decode("utf-8")
         return response, parsed
+
+    def player_workbook(self, players, ceduti=()):
+        defaults = {column: 0 for column in LISTONE_COLUMNS}
+        rows = [{**defaults, "RM": "Por", "Nome": "Player", "Squadra": "AAA", **player} for player in players]
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            pd.DataFrame([["Quotazioni Fantacalcio Stagione 2026 27"]]).to_excel(writer, sheet_name="Tutti", index=False, header=False)
+            pd.DataFrame(rows, columns=sorted(LISTONE_COLUMNS)).to_excel(writer, sheet_name="Tutti", index=False, startrow=1)
+            pd.DataFrame([["Quotazioni Fantacalcio Stagione 2026 27"]]).to_excel(writer, sheet_name="Ceduti", index=False, header=False)
+            pd.DataFrame({"Id": list(ceduti)}).to_excel(writer, sheet_name="Ceduti", index=False, startrow=1)
+        return output.getvalue()
 
     def test_profiles_round_trip_and_index(self):
         expected = json.loads(json.dumps(profile_response(LeagueProfile.from_dict(self.profile))))
@@ -364,6 +385,134 @@ class LocalApiServerTests(unittest.TestCase):
         )
         self.assertEqual(response.status, 400)
         self.assertEqual(payload["error"]["code"], "invalid_upload_type")
+
+    def test_player_list_check_upload_status_and_apply(self):
+        root = Path(self.temp_dir.name)
+        active = root / "active.xlsx"
+        active_bytes = self.player_workbook([
+            {"Id": 1, "R": "P", "Nome": "One", "Squadra": "AAA", "Qt.A": 10, "FVM": 20},
+        ])
+        active.write_bytes(active_bytes)
+        source = next(item for item in self.profile["current_sources"] if item["name"] == "player_list")
+        source["path"] = str(active)
+        self.player_list_html = """<h1>Quotazioni 2026/27</h1><table><tr class="player-row">
+            <td class="role">P</td><td><a class="name" href="/calciatori/1/one">One</a></td>
+            <td class="team">AAA</td><td class="quotation">10</td><td class="fvm">20</td></tr></table>"""
+        body = json.dumps({"profile": self.profile}).encode("utf-8")
+        json_headers = {"Content-Type": "application/json"}
+
+        response, payload = self.request("POST", "/api/updates/player-list/check", body, json_headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["state"], "unchanged")
+        self.assertTrue(payload["download_url"].endswith("/21/1"))
+
+        response, payload = self.request("POST", "/api/updates/player-list/status", body, json_headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["state"], "never_uploaded")
+
+        candidate = self.player_workbook([
+            {"Id": 1, "R": "P", "Nome": "One", "Squadra": "AAA", "Qt.A": 11, "FVM": 21},
+            {"Id": 2, "R": "A", "Nome": "Two", "Squadra": "BBB", "Qt.A": 8, "FVM": 15},
+        ])
+        response, uploaded = self.request(
+            "PUT", "/api/updates/player-list/candidate/my-team/2026-27", candidate,
+            {"Content-Type": "application/octet-stream", "X-Filename": "official.xlsx"},
+        )
+        self.assertEqual(response.status, 200)
+        self.assertEqual(uploaded["state"], "candidate_ready")
+
+        response, status = self.request("POST", "/api/updates/player-list/status", body, json_headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(status["summary"]["added"], 1)
+        self.assertEqual(status["candidate_hash"], uploaded["candidate_hash"])
+        self.assertEqual(status["profile_hash"], LeagueProfile.from_dict(self.profile).configuration_hash)
+        self.assertEqual(len(status["active_hash"]), 64)
+
+        stale = json.dumps({
+            "profile": self.profile, "candidate_hash": "0" * 64,
+            "profile_hash": status["profile_hash"], "active_hash": status["active_hash"],
+        }).encode("utf-8")
+        response, payload = self.request("POST", "/api/updates/player-list/apply", stale, json_headers)
+        self.assertEqual(response.status, 409)
+        self.assertEqual(payload["error"]["code"], "stale_candidate")
+
+        changed_profile = json.loads(json.dumps(self.profile))
+        changed_profile["name"] = "Changed while reviewing"
+        response, _ = self.request("PUT", "/api/profiles/my-team", json.dumps(changed_profile).encode("utf-8"), json_headers)
+        self.assertEqual(response.status, 200)
+        stale_profile_body = json.dumps({
+            "profile": self.profile, "candidate_hash": uploaded["candidate_hash"],
+            "profile_hash": status["profile_hash"], "active_hash": status["active_hash"],
+        }).encode("utf-8")
+        response, payload = self.request("POST", "/api/updates/player-list/apply", stale_profile_body, json_headers)
+        self.assertEqual(response.status, 409)
+        self.assertEqual(payload["error"]["code"], "stale_profile")
+
+        changed_body = json.dumps({"profile": changed_profile}).encode("utf-8")
+        response, status = self.request("POST", "/api/updates/player-list/status", changed_body, json_headers)
+        self.assertEqual(response.status, 200)
+        active.write_bytes(self.player_workbook([
+            {"Id": 1, "R": "P", "Nome": "One", "Squadra": "AAA", "Qt.A": 13, "FVM": 20},
+        ]))
+        stale_active_body = json.dumps({
+            "profile": changed_profile, "candidate_hash": uploaded["candidate_hash"],
+            "profile_hash": status["profile_hash"], "active_hash": status["active_hash"],
+        }).encode("utf-8")
+        response, payload = self.request("POST", "/api/updates/player-list/apply", stale_active_body, json_headers)
+        self.assertEqual(response.status, 409)
+        self.assertEqual(payload["error"]["code"], "stale_active_source")
+        active.write_bytes(active_bytes)
+
+        apply_body = json.dumps({
+            "profile": changed_profile, "candidate_hash": uploaded["candidate_hash"],
+            "profile_hash": status["profile_hash"], "active_hash": status["active_hash"],
+        }).encode("utf-8")
+        response, payload = self.request("POST", "/api/updates/player-list/apply", apply_body, json_headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["candidate_hash"], uploaded["candidate_hash"])
+        updated_source = next(item for item in payload["profile"]["current_sources"] if item["name"] == "player_list")
+        self.assertIn(uploaded["candidate_hash"], updated_source["path"])
+        self.assertTrue(Path(updated_source["path"]).is_file())
+        self.assertEqual(active.read_bytes(), active_bytes)
+        saved = json.loads((self.server.profiles_dir / "my-team.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["current_sources"], payload["profile"]["current_sources"])
+        self.assertEqual(self.calls[-1].configuration_hash, LeagueProfile.from_dict(saved).configuration_hash)
+
+    def test_player_list_generation_failure_preserves_profile_and_dataset(self):
+        root = Path(self.temp_dir.name)
+        active = root / "failure-active.xlsx"
+        active.write_bytes(self.player_workbook([{"Id": 1, "R": "P", "Nome": "One", "Qt.A": 10, "FVM": 20}]))
+        source = next(item for item in self.profile["current_sources"] if item["name"] == "player_list")
+        source["path"] = str(active)
+        response, _ = self.request("PUT", "/api/profiles/my-team", json.dumps(self.profile).encode("utf-8"), {"Content-Type": "application/json"})
+        self.assertEqual(response.status, 200)
+        candidate = self.player_workbook([{"Id": 1, "R": "P", "Nome": "One", "Qt.A": 12, "FVM": 22}])
+        response, uploaded = self.request("PUT", "/api/updates/player-list/candidate/my-team/2026-27", candidate, {"X-Filename": "candidate.xlsx"})
+        self.assertEqual(response.status, 200)
+        body = json.dumps({"profile": self.profile}).encode("utf-8")
+        response, status = self.request("POST", "/api/updates/player-list/status", body, {"Content-Type": "application/json"})
+        self.assertEqual(response.status, 200)
+        output = self.server.datasets_dir / "my-team/2026-27/auction_data.json"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text('{"old":true}', encoding="utf-8")
+        old_profile = (self.server.profiles_dir / "my-team.json").read_bytes()
+
+        def failing_generator(profile, datasets_dir):
+            path = datasets_dir / profile.profile_id / "2026-27/auction_data.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('{"partial":true}', encoding="utf-8")
+            raise RuntimeError("failed")
+
+        self.server.generator = failing_generator
+        request = json.dumps({
+            "profile": self.profile, "candidate_hash": uploaded["candidate_hash"],
+            "profile_hash": status["profile_hash"], "active_hash": status["active_hash"],
+        }).encode("utf-8")
+        response, payload = self.request("POST", "/api/updates/player-list/apply", request, {"Content-Type": "application/json"})
+        self.assertEqual(response.status, 500)
+        self.assertEqual(payload["error"]["code"], "generation_failed")
+        self.assertEqual((self.server.profiles_dir / "my-team.json").read_bytes(), old_profile)
+        self.assertEqual(json.loads(output.read_text(encoding="utf-8")), {"old": True})
 
 if __name__ == "__main__":
     unittest.main()

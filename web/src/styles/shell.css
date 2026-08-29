@@ -166,12 +166,19 @@
   z-index: 40;
   inset: auto 0 0;
   display: grid;
-  grid-auto-columns: 1fr;
+  grid-auto-columns: minmax(76px, 1fr);
   grid-auto-flow: column;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
   height: calc(var(--h-tabbar) + var(--safe-bottom));
   padding-bottom: var(--safe-bottom);
   border-top: 1px solid var(--c-line-soft);
   background: var(--c-canvas);
+}
+
+.tabbar::-webkit-scrollbar {
+  display: none;
 }
 
 .tab {

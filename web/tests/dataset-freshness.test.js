@@ -34,6 +34,19 @@ test("a missing required source is reported", () => {
   assert.equal(datasetFreshness(profile, data), "fonti cambiate");
 });
 
+test("a source replaced at the same path is reported from its live hash", () => {
+  const data = dataset({
+    source_fingerprints: [{ group: "current_sources", name: "player_list", exists: true, sha256: "old" }],
+  });
+  const current = [{ group: "current_sources", name: "player_list", exists: true, sha256: "new" }];
+  assert.equal(datasetFreshness(profile, data, current), "fonti cambiate");
+});
+
+test("matching live source hashes keep the dataset current", () => {
+  const fingerprints = [{ group: "current_sources", name: "player_list", exists: true, sha256: "same" }];
+  assert.equal(datasetFreshness(profile, dataset({ source_fingerprints: fingerprints }), fingerprints), "dataset corrente");
+});
+
 test("a source the profile no longer declares counts as required", () => {
   const data = dataset({
     source_fingerprints: [{ name: "dropped_source", exists: false }],

@@ -41,15 +41,13 @@ const TABS = [
     ],
   },
   {
-    id: "lega",
-    label: "Lega",
-    icon: "sliders",
-    views: [
-      ["simulation", "Simulazione"],
-      ["updates", "Aggiornamenti"],
-      ["settings", "Impostazioni"],
-    ],
+    id: "simulation",
+    label: "Simulazione",
+    icon: "chart",
+    views: [["simulation", "Simulazione"]],
   },
+  { id: "updates", label: "Aggiornamenti", icon: "refresh", views: [["updates", "Aggiornamenti"]] },
+  { id: "settings", label: "Impostazioni", icon: "sliders", views: [["settings", "Impostazioni"]] },
 ];
 
 const tabOf = (view) =>
@@ -90,6 +88,7 @@ function App() {
   const [generationStatus, setGenerationStatus] = useState("");
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulationStatus, setSimulationStatus] = useState("");
+  const [currentSourceFingerprints, setCurrentSourceFingerprints] = useState(null);
   const [view, setView] = useState("overview");
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   const [selectedTeam, setSelectedTeam] = useState(null);
@@ -194,6 +193,36 @@ function App() {
       cancelled = true;
     };
   }, [apiBase, profile]);
+
+  useEffect(() => {
+    if (!profile) {
+      setCurrentSourceFingerprints(null);
+      return;
+    }
+    let active = true;
+    const refresh = () => {
+      fetch(apiUrl("/api/sources/status", apiBase), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
+      })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((payload) => {
+          if (active && Array.isArray(payload?.sources))
+            setCurrentSourceFingerprints(payload.sources);
+        })
+        .catch(() => {});
+    };
+    setCurrentSourceFingerprints(null);
+    refresh();
+    window.addEventListener("focus", refresh);
+    const interval = statusOpen ? window.setInterval(refresh, 30000) : null;
+    return () => {
+      active = false;
+      window.removeEventListener("focus", refresh);
+      if (interval) window.clearInterval(interval);
+    };
+  }, [apiBase, profile, statusOpen]);
 
   const applyRoute = (route) => {
     setView(route.view);
@@ -507,6 +536,19 @@ function App() {
     }
   };
 
+  const adoptPlayerListUpdate = async (result) => {
+    const nextProfile = await loadProfile(result.profile_id, { apiBase });
+    const nextData = await loadDatasetUrl(
+      apiUrl(`/api/datasets/${result.dataset_path}`, apiBase),
+      { profile: nextProfile },
+    );
+    generatedProfileCommit.current = nextProfile;
+    setProfile(nextProfile);
+    setData(nextData);
+    setSeason(null);
+    setAuctionDraft(emptyDraft());
+  };
+
   const rerunSimulation = async () => {
     if (isSimulating) return;
     const request = latestProfileRequest();
@@ -577,7 +619,7 @@ function App() {
       </main>
     );
 
-  const datasetState = datasetFreshness(profile, data);
+  const datasetState = datasetFreshness(profile, data, currentSourceFingerprints);
   const simulationState = simulationFreshness(profile, data, season);
   const datasetStale = datasetState !== "dataset corrente";
   const tab = tabOf(view);
@@ -683,7 +725,11 @@ function App() {
             />
           ) : null}
           {view === "updates" ? (
-            <Updates profile={profile} apiBase={apiBase} />
+            <Updates
+              profile={profile}
+              apiBase={apiBase}
+              onPlayerListApplied={adoptPlayerListUpdate}
+            />
           ) : null}
           {view === "settings" ? (
             <>

@@ -26,7 +26,20 @@ from .generate import (
     load_profile,
     resolve_profile,
 )
-from .freshness import dataset_configuration_hash, simulation_configuration_hash
+from .freshness import dataset_configuration_hash, simulation_configuration_hash, source_fingerprints
+from .player_list_updates import (
+    FetchPage as PlayerListFetchPage,
+    PlayerListUpdateError,
+    StalePlayerListUpdateError,
+    apply_candidate,
+    candidate_status,
+    fetch_public_page,
+    persisted_or_inline_profile,
+    profile_transaction,
+    public_check,
+    season_slug,
+    store_candidate,
+)
 from .sosfanta_updates import (
     FetchPage,
     SosFantaError,
@@ -90,6 +103,7 @@ class LocalApiServer(ThreadingHTTPServer):
         simulator: SimulationRunner | None = None,
         profile_loader: ProfileLoader = load_profile,
         update_fetcher: FetchPage = fetch_page,
+        player_list_fetcher: PlayerListFetchPage = fetch_public_page,
     ) -> None:
         self.profiles_dir = Path(profiles_dir)
         self.datasets_dir = Path(datasets_dir)
@@ -100,6 +114,7 @@ class LocalApiServer(ThreadingHTTPServer):
         self.simulator = simulator or _simulate_current_dataset
         self.profile_loader = profile_loader
         self.update_fetcher = update_fetcher
+        self.player_list_fetcher = player_list_fetcher
         super().__init__(address, LocalApiHandler)
 
     def handle_error(self, request: Any, client_address: Any) -> None:
@@ -132,7 +147,9 @@ class LocalApiHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self) -> None:
         path = self._path()
-        if path.startswith("/api/uploads/"):
+        if path.startswith("/api/updates/player-list/candidate/"):
+            self._put_player_list_candidate(path.removeprefix("/api/updates/player-list/candidate/"))
+        elif path.startswith("/api/uploads/"):
             self._put_upload(path.removeprefix("/api/uploads/"))
         elif path.startswith("/api/profiles/"):
             self._put_profile(path.removeprefix("/api/profiles/"))
@@ -147,6 +164,15 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.NOT_FOUND, "not_found", "The requested endpoint does not exist.")
 
     def do_POST(self) -> None:
+        if self._path() == "/api/updates/player-list/check":
+            self._check_player_list_updates()
+            return
+        if self._path() == "/api/updates/player-list/status":
+            self._player_list_status()
+            return
+        if self._path() == "/api/updates/player-list/apply":
+            self._apply_player_list_candidate()
+            return
         if self._path() == "/api/updates/sosfanta/check":
             self._check_sosfanta_updates()
             return
@@ -173,16 +199,14 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             return
         try:
             profile = resolve_profile(request, self.server.profiles_dir, profile_loader=self.server.profile_loader)
-            profile = self._derive_calendar_participants(profile)
+            with profile_transaction(self.server.updates_dir, profile.profile_id):
+                profile = resolve_profile(request, self.server.profiles_dir, profile_loader=self.server.profile_loader)
+                profile = self._derive_calendar_participants(profile)
+                result = generate_dataset(profile, self.server.datasets_dir, generator=self.server.generator)
         except ProfileRequestError as error:
             self._error(HTTPStatus.BAD_REQUEST, "invalid_profile", str(error))
             return
         except (OSError, ValueError) as error:
-            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_source_data", str(error))
-            return
-        try:
-            result = generate_dataset(profile, self.server.datasets_dir, generator=self.server.generator)
-        except (FileNotFoundError, ValueError) as error:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_source_data", str(error))
             return
         except Exception:
@@ -281,11 +305,12 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.BAD_REQUEST, "invalid_profile", str(error))
             return
         try:
-            profile_path.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=profile_path.parent, delete=False) as handle:
-                json.dump(profile.to_dict(), handle, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
-                temporary_path = Path(handle.name)
-            temporary_path.replace(profile_path)
+            with profile_transaction(self.server.updates_dir, profile.profile_id):
+                profile_path.parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=profile_path.parent, delete=False) as handle:
+                    json.dump(profile.to_dict(), handle, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+                    temporary_path = Path(handle.name)
+                temporary_path.replace(profile_path)
         except (OSError, TypeError, ValueError):
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "storage_error", "The profile could not be saved.")
             return
@@ -318,11 +343,12 @@ class LocalApiHandler(BaseHTTPRequestHandler):
         profile_id, group, source_name = parts
         target = self.server.uploads_dir / profile_id / group / f"{source_name}{suffix}"
         try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile("wb", dir=target.parent, delete=False) as handle:
-                handle.write(self.rfile.read(content_length))
-                temporary_path = Path(handle.name)
-            temporary_path.replace(target)
+            with profile_transaction(self.server.updates_dir, profile_id):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile("wb", dir=target.parent, delete=False) as handle:
+                    handle.write(self.rfile.read(content_length))
+                    temporary_path = Path(handle.name)
+                temporary_path.replace(target)
         except OSError:
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "upload_failed", "The source file could not be stored.")
             return
@@ -337,19 +363,127 @@ class LocalApiHandler(BaseHTTPRequestHandler):
         except (AttributeError, TypeError, ValueError, KeyError) as error:
             self._error(HTTPStatus.BAD_REQUEST, "invalid_profile", str(error))
             return
-        statuses = []
-        for group in SOURCE_GROUPS:
-            for source in getattr(profile, group):
-                declared = Path(source.path)
-                candidates = [declared] if declared.is_absolute() else [declared, Path.cwd() / declared, Path(__file__).resolve().parents[1] / declared]
-                existing_path = next((candidate for candidate in candidates if candidate.is_file()), None)
-                statuses.append({
-                    "group": group,
-                    "name": source.name,
-                    "path": source.path,
-                    "exists": existing_path is not None,
-                })
-        self._send_json(HTTPStatus.OK, {"sources": statuses})
+        self._send_json(HTTPStatus.OK, {"sources": source_fingerprints(profile, Path())})
+
+    def _player_list_profile_request(self) -> tuple[Any, dict[str, Any]] | None:
+        value = self._read_json_object()
+        if value is None:
+            return None
+        try:
+            profile = resolve_profile(value, self.server.profiles_dir, profile_loader=self.server.profile_loader)
+        except ProfileRequestError as error:
+            self._error(HTTPStatus.BAD_REQUEST, "invalid_profile", str(error))
+            return None
+        return profile, value
+
+    def _put_player_list_candidate(self, relative_path: str) -> None:
+        parts = relative_path.split("/")
+        if len(parts) != 2 or not PROFILE_NAME.fullmatch(parts[0]) or not re.fullmatch(r"\d{4}-\d{2}", parts[1]):
+            self._error(HTTPStatus.BAD_REQUEST, "invalid_candidate_path", "Candidate paths must identify a profile and YYYY-YY season.")
+            return
+        profile_id, slug = parts
+        season = slug.replace("-", "/")
+        try:
+            if season_slug(season) != slug:
+                raise PlayerListUpdateError("The candidate season is invalid.")
+        except PlayerListUpdateError as error:
+            self._error(HTTPStatus.BAD_REQUEST, "invalid_candidate_path", str(error))
+            return
+        filename = self.headers.get("X-Filename", "")
+        if Path(filename).suffix.lower() != ".xlsx":
+            self._error(HTTPStatus.BAD_REQUEST, "invalid_upload_type", "The candidate must be an .xlsx file.")
+            return
+        try:
+            content_length = int(self.headers.get("Content-Length", ""))
+        except ValueError:
+            content_length = -1
+        if content_length < 1 or content_length > MAX_UPLOAD_BYTES:
+            self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "invalid_upload_size", "Upload size must be between 1 byte and 50 MB.")
+            return
+        try:
+            result = store_candidate(self.server.updates_dir, profile_id, season, self.rfile.read(content_length), filename)
+        except PlayerListUpdateError as error:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_candidate", str(error))
+            return
+        except OSError:
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "storage_error", "The candidate could not be stored.")
+            return
+        self._send_json(HTTPStatus.OK, result)
+
+    def _check_player_list_updates(self) -> None:
+        request = self._player_list_profile_request()
+        if request is None:
+            return
+        profile, _ = request
+        try:
+            result = public_check(profile, self.server.player_list_fetcher)
+        except PlayerListUpdateError as error:
+            self._error(HTTPStatus.BAD_GATEWAY, "update_check_failed", str(error))
+            return
+        except OSError as error:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_source_data", str(error))
+            return
+        self._send_json(HTTPStatus.OK, result)
+
+    def _player_list_status(self) -> None:
+        request = self._player_list_profile_request()
+        if request is None:
+            return
+        profile, _ = request
+        try:
+            with profile_transaction(self.server.updates_dir, profile.profile_id):
+                active_profile = persisted_or_inline_profile(self.server.profiles_dir, profile, self.server.profile_loader)
+                active_profile = self._derive_calendar_participants(active_profile)
+                result = candidate_status(self.server.updates_dir, active_profile)
+        except PlayerListUpdateError as error:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "candidate_unavailable", str(error))
+            return
+        except OSError:
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "storage_error", "Candidate status is unavailable.")
+            return
+        self._send_json(HTTPStatus.OK, result)
+
+    def _apply_player_list_candidate(self) -> None:
+        request = self._player_list_profile_request()
+        if request is None:
+            return
+        profile, value = request
+        profile = self._derive_calendar_participants(profile)
+        candidate_hash = value.get("candidate_hash")
+        profile_hash = value.get("profile_hash")
+        active_hash = value.get("active_hash")
+        if not isinstance(candidate_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", candidate_hash):
+            self._error(HTTPStatus.BAD_REQUEST, "invalid_candidate_hash", "candidate_hash must be a SHA-256 string.")
+            return
+        if not isinstance(profile_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", profile_hash):
+            self._error(HTTPStatus.BAD_REQUEST, "invalid_profile_hash", "profile_hash must be a SHA-256 string.")
+            return
+        if not isinstance(active_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", active_hash):
+            self._error(HTTPStatus.BAD_REQUEST, "invalid_active_hash", "active_hash must be a SHA-256 string.")
+            return
+        try:
+            result = apply_candidate(
+                self.server.updates_dir, self.server.uploads_dir, self.server.profiles_dir,
+                profile, candidate_hash, profile_hash, active_hash, self.server.datasets_dir, self.server.generator,
+                self.server.profile_loader, generate_dataset, self._derive_calendar_participants,
+            )
+        except StalePlayerListUpdateError as error:
+            self._error(HTTPStatus.CONFLICT, error.code, str(error))
+            return
+        except PlayerListUpdateError as error:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "candidate_unavailable", str(error))
+            return
+        except (FileNotFoundError, ValueError) as error:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_source_data", str(error))
+            return
+        except OSError:
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "storage_error", "The updated profile could not be stored.")
+            return
+        except Exception:
+            traceback.print_exc(file=sys.stderr)
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "generation_failed", "Generation failed.")
+            return
+        self._send_json(HTTPStatus.OK, result)
 
     def _update_request(self) -> tuple[Any, str, str, str] | None:
         value = self._read_json_object()
@@ -591,9 +725,10 @@ def create_server(
     simulator: SimulationRunner | None = None,
     profile_loader: ProfileLoader = load_profile,
     update_fetcher: FetchPage = fetch_page,
+    player_list_fetcher: PlayerListFetchPage = fetch_public_page,
 ) -> LocalApiServer:
     """Create a local API server; inject a pipeline generator for tests or embedding."""
-    return LocalApiServer(address, profiles_dir=profiles_dir, datasets_dir=datasets_dir, uploads_dir=uploads_dir, updates_dir=updates_dir, default_profile_path=default_profile_path, generator=generator, simulator=simulator, profile_loader=profile_loader, update_fetcher=update_fetcher)
+    return LocalApiServer(address, profiles_dir=profiles_dir, datasets_dir=datasets_dir, uploads_dir=uploads_dir, updates_dir=updates_dir, default_profile_path=default_profile_path, generator=generator, simulator=simulator, profile_loader=profile_loader, update_fetcher=update_fetcher, player_list_fetcher=player_list_fetcher)
 
 
 def _simulate_current_dataset(profile: Any, output_dir: Path, iterations: int, seed: int) -> dict[str, Any]:

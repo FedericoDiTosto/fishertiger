@@ -1,16 +1,226 @@
 import { useEffect, useRef, useState } from "react";
 import {
   acceptSosFanta,
+  applyPlayerList,
+  checkPlayerList,
   checkSosFanta,
+  fantacalcioDownloadUrl,
   fetchSosFantaBundle,
+  getPlayerListStatus,
   getSosFantaStatus,
+  playerListStateLabel,
   sosFantaGuideUrl,
+  uploadPlayerListCandidate,
   updateStateLabel,
 } from "./updates-client.js";
 
 const ROLE_LABELS = { P: "Portieri", D: "Difensori", C: "Centrocampisti", A: "Attaccanti" };
+const LISTONE_SUMMARY_LABELS = {
+  added: "Nuovi", removed: "Rimossi", ceduti_added: "Nuovi ceduti",
+  ceduti_removed: "Ceduti rientrati", role: "Ruoli", name: "Nomi",
+  team: "Squadre", quotation: "Quotazioni", fvm: "FVM",
+};
+const displayChangeValue = (value) => value && typeof value === "object"
+  ? Object.entries(value).map(([key, item]) => `${key}: ${item}`).join(" · ")
+  : String(value ?? "-");
 
-export function Updates({ profile, apiBase = "" }) {
+function PlayerListUpdates({ profile, apiBase, onApplied }) {
+  const [candidate, setCandidate] = useState(null);
+  const [remote, setRemote] = useState(null);
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  const [problem, setProblem] = useState("");
+  const sequence = useRef(0);
+  const season = profile?.season?.season;
+  const downloadUrl = remote?.download_url || fantacalcioDownloadUrl(season);
+
+  useEffect(() => {
+    let active = true;
+    const request = ++sequence.current;
+    setCandidate(null);
+    setRemote(null);
+    setBusy("");
+    setMessage("");
+    setProblem("");
+    getPlayerListStatus(profile, { apiBase })
+      .then((next) => {
+        if (active && request === sequence.current) setCandidate(next);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [apiBase, profile?.profile_id, season]);
+
+  const check = async () => {
+    const request = ++sequence.current;
+    setBusy("check");
+    setMessage("");
+    setProblem("");
+    try {
+      const next = await checkPlayerList(profile, { apiBase });
+      if (request !== sequence.current) return;
+      setRemote(next);
+      setMessage(next.state === "changed" ? "Il listone online contiene variazioni." : "Il listone online coincide con la fonte attiva.");
+    } catch (error) {
+      if (request !== sequence.current) return;
+      setProblem(error?.code || "request_failed");
+      setMessage(error instanceof Error ? error.message : "Controllo non completato.");
+    } finally {
+      if (request === sequence.current) setBusy("");
+    }
+  };
+
+  const upload = async (file) => {
+    if (!file) return;
+    const request = ++sequence.current;
+    setBusy("upload");
+    setMessage("");
+    setProblem("");
+    try {
+      await uploadPlayerListCandidate(file, profile, { apiBase });
+      const next = await getPlayerListStatus(profile, { apiBase });
+      if (request !== sequence.current) return;
+      setCandidate(next);
+      setMessage(next.state === "unchanged" ? "Il file caricato coincide con il listone attivo." : "File verificato: esamina le differenze prima di applicarlo.");
+    } catch (error) {
+      if (request !== sequence.current) return;
+      setProblem(error?.code || "request_failed");
+      setMessage(error instanceof Error ? error.message : "Caricamento non completato.");
+    } finally {
+      if (request === sequence.current) setBusy("");
+    }
+  };
+
+  const apply = async () => {
+    const request = ++sequence.current;
+    setBusy("apply");
+    setMessage("");
+    setProblem("");
+    try {
+      const result = await applyPlayerList(
+        profile,
+        candidate?.candidate_hash,
+        candidate?.profile_hash,
+        candidate?.active_hash,
+        { apiBase },
+      );
+      if (request !== sequence.current) return;
+      if (onApplied) await onApplied(result);
+      if (request !== sequence.current) return;
+      setCandidate((current) => ({ ...current, state: "unchanged", summary: {}, details: {} }));
+      setRemote(null);
+      setMessage("Listone applicato, profilo aggiornato e dataset rigenerato.");
+    } catch (error) {
+      if (request !== sequence.current) return;
+      setProblem(error?.code || "request_failed");
+      setMessage(error instanceof Error ? error.message : "Aggiornamento non completato.");
+    } finally {
+      if (request === sequence.current) setBusy("");
+    }
+  };
+
+  const summary = candidate?.summary || {};
+  const summaryItems = Object.entries(LISTONE_SUMMARY_LABELS).filter(([key]) => summary[key]);
+
+  return (
+    <article className="update-source-card player-list-card">
+      <header>
+        <div><span className="source-index">02</span><h2>Listone Fantacalcio</h2></div>
+        <span className={`update-state ${candidate?.state || remote?.state || "idle"}`}>
+          {candidate?.state && candidate.state !== "never_uploaded" ? playerListStateLabel(candidate.state) : playerListStateLabel(remote?.state)}
+        </span>
+      </header>
+
+      <div className="update-source-meta">
+        <div><span>Stagione</span><strong>{season}</strong></div>
+        <div><span>Ambito</span><strong>Ruoli, squadre, quotazioni e FVM</strong></div>
+        <div><span>File candidato</span><strong>{candidate?.uploaded_at?.slice(0, 16).replace("T", " ") || "Nessuno"}</strong></div>
+      </div>
+
+      <a className="source-url" href="https://www.fantacalcio.it/quotazioni-fantacalcio" target="_blank" rel="noreferrer">
+        https://www.fantacalcio.it/quotazioni-fantacalcio
+      </a>
+
+      <div className="update-actions player-list-actions">
+        <button className="update-check-button" onClick={check} disabled={Boolean(busy)}>
+          {busy === "check" ? "Controllo in corso..." : "Controlla listone online"}
+        </button>
+        <a className="update-action-link" href={downloadUrl} target="_blank" rel="noopener">
+          Scarica XLSX ufficiale
+        </a>
+        <label className={`update-file-button${busy ? " disabled" : ""}`}>
+          {busy === "upload" ? "Verifica file..." : "Carica XLSX scaricato"}
+          <input
+            type="file"
+            accept=".xlsx"
+            disabled={Boolean(busy)}
+            onChange={(event) => {
+              upload(event.target.files?.[0]);
+              event.target.value = "";
+            }}
+          />
+        </label>
+        {candidate?.state === "candidate_ready" && (
+          <button onClick={apply} disabled={Boolean(busy) || Boolean(candidate.details?.truncated)}>
+            {busy === "apply" ? "Rigenerazione in corso..." : "Applica e rigenera"}
+          </button>
+        )}
+      </div>
+
+      <div className="player-list-status">
+        {remote?.summary && (
+          <div className="update-summary">
+            <span>CONTROLLO ONLINE</span>
+            <strong>{remote.summary.public_players} giocatori</strong>
+            <p>{remote.summary.added} nuovi · {remote.summary.removed} rimossi · {remote.summary.changed} modificati</p>
+          </div>
+        )}
+        {message && <p className={`update-message ${problem ? "error" : ""}`} role={problem ? "alert" : "status"}>{message}</p>}
+        <p className="accept-warning">Il download ufficiale richiede una sessione Fantacalcio autenticata. Le credenziali non vengono condivise con Fishertiger.</p>
+      </div>
+
+      {summaryItems.length > 0 && (
+        <div className="update-diff">
+          <div className="diff-title"><span>DIFF XLSX AUTOREVOLE</span><strong>{summary.changed_players || 0} giocatori modificati</strong></div>
+          <div className="listone-summary-grid">
+            {summaryItems.map(([key, label]) => <div key={key}><strong>{summary[key]}</strong><span>{label}</span></div>)}
+          </div>
+          {[
+            ["added", "Giocatori aggiunti"],
+            ["removed", "Giocatori rimossi"],
+            ["ceduti_added", "Nuovi giocatori nel foglio Ceduti"],
+            ["ceduti_removed", "Giocatori rimossi dal foglio Ceduti"],
+          ].map(([key, label]) => candidate.details?.[key]?.length > 0 && (
+            <details key={key}>
+              <summary><span>{label}</span><b>{candidate.details[key].length}</b></summary>
+              <div className="listone-entry-list">
+                {candidate.details[key].map((item) => {
+                  const id = typeof item === "object" ? item.id : item;
+                  const name = typeof item === "object" ? item.name : "";
+                  return <p key={id}><strong>{name || `ID ${id}`}</strong>{name && <span>#{id}</span>}</p>;
+                })}
+              </div>
+            </details>
+          ))}
+          {candidate.details?.changed?.map((change) => (
+            <details key={change.id}>
+              <summary><span>{change.name} <small>#{change.id}</small></span><b>{Object.keys(change.fields).join(", ")}</b></summary>
+              <div className="listone-change-fields">
+                {Object.entries(change.fields).map(([field, values]) => (
+                  <p key={field}><strong>{field}</strong><span>{displayChangeValue(values.before)} → {displayChangeValue(values.after)}</span></p>
+                ))}
+              </div>
+            </details>
+          ))}
+          {candidate.details?.truncated && (
+            <p className="update-truncated" role="alert">Il diff supera il limite visualizzabile. Non applicare il file senza una revisione esterna completa.</p>
+          )}
+        </div>
+      )}
+    </article>
+  );
+}
+
+export function Updates({ profile, apiBase = "", onPlayerListApplied }) {
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
@@ -94,15 +304,15 @@ export function Updates({ profile, apiBase = "" }) {
       <div className="updates-heading">
         <span className="eyebrow">FONTI ESTERNE</span>
         <h1>Aggiornamenti</h1>
-        <p>Controlla le fonti senza modificare automaticamente i dati locali.</p>
+        <p>Controlla le fonti, verifica le differenze e applica solo gli aggiornamenti approvati.</p>
       </div>
 
       <div className="update-workflow" aria-label="Come usare gli aggiornamenti">
         <strong>Come funziona</strong>
         <ol>
-          <li><b>Controlla</b><span>Scarica e confronta la guida della stagione selezionata.</span></li>
-          <li><b>Prima verifica</b><span>Salva il contenuto attuale come riferimento iniziale.</span></li>
-          <li><b>Verifiche successive</b><span>Se cambia qualcosa, esamina il diff e scarica il bundle AI.</span></li>
+          <li><b>Controlla</b><span>Confronta le fonti online con i dati attivi.</span></li>
+          <li><b>Verifica</b><span>Esamina il diff semantico o il file XLSX ufficiale.</span></li>
+          <li><b>Applica</b><span>Conferma esplicitamente prima di aggiornare e rigenerare.</span></li>
         </ol>
         <p>Questa funzione rileva e prepara gli aggiornamenti. Non modifica automaticamente <code>titolari.csv</code>.</p>
       </div>
@@ -169,6 +379,8 @@ export function Updates({ profile, apiBase = "" }) {
           </div>
         )}
       </article>
+
+      <PlayerListUpdates profile={profile} apiBase={apiBase} onApplied={onPlayerListApplied} />
 
       <aside className="update-method-note">
         <strong>Metodo</strong>

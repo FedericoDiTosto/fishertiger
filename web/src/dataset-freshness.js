@@ -12,12 +12,23 @@ const missesRequiredSource = (profile, fingerprints) => {
   });
 };
 
-export const datasetFreshness = (profile, data) => {
+const changedSourceContent = (generated, current) => {
+  if (!Array.isArray(current)) return false;
+  return list(generated).some((source) => {
+    const match = current.find((item) => item.group === source.group && item.name === source.name);
+    if (!match || match.exists !== source.exists) return true;
+    return source.exists && match.sha256 !== source.sha256;
+  });
+};
+
+export const datasetFreshness = (profile, data, currentSources) => {
   const meta = data?.meta?.profile;
   if (!meta?.dataset_configuration_hash) return "dataset da rigenerare";
   if (meta.dataset_configuration_hash !== profile?.dataset_configuration_hash)
     return "dataset da rigenerare";
   if (missesRequiredSource(profile, meta.source_fingerprints))
+    return "fonti cambiate";
+  if (changedSourceContent(meta.source_fingerprints, currentSources))
     return "fonti cambiate";
   return "dataset corrente";
 };

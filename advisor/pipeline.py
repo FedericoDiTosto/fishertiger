@@ -60,6 +60,13 @@ def _require_columns(frame: pd.DataFrame, required: set[str], source: str) -> No
         raise ValueError(f"{source}: missing required columns {sorted(missing)}")
 
 
+def active_auction_guide(guide: pd.DataFrame, listone: pd.DataFrame) -> pd.DataFrame:
+    """Keep optional guide enrichment only for players in the current official list."""
+    if not guide.empty and guide.id_fantacalcio.duplicated().any():
+        raise ValueError("guide_asta_sosfanta: IDs must be unique")
+    return guide[guide.id_fantacalcio.isin(set(listone.Id))].copy()
+
+
 def _season_sort_key(label: str) -> tuple[int, int, str]:
     numbers = [int(value) for value in re.findall(r"\d+", label)]
     if not numbers:
@@ -404,8 +411,7 @@ def build_projections(raw: Path = RAW, output: Path = PROCESSED, config: ModelCo
     guide_source = sources.get("auction_guide")
     guide_path = _resolve_source(guide_source, raw) if guide_source else raw / "guide_asta_sosfanta.csv"
     guide = pd.read_csv(guide_path) if guide_path.exists() else pd.DataFrame(columns=["id_fantacalcio", "fascia"])
-    if not guide.empty and (guide.id_fantacalcio.duplicated().any() or not set(guide.id_fantacalcio).issubset(set(listone.Id))):
-        raise ValueError("guide_asta_sosfanta: IDs must be unique and present in the listone")
+    guide = active_auction_guide(guide, listone)
     listone = listone[~listone.Id.isin(ceduti.Id.dropna())].copy()
     overrides = load_identity_overrides()
     starter_matches = match_manual(starters, listone, "titolari", overrides)
